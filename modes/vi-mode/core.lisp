@@ -12,7 +12,7 @@
            :*command-keymap*
            :*insert-keymap*
            :*inactive-keymap*
-           :command
+           :normal
            :insert))
 (in-package :lem-vi-mode.core)
 
@@ -54,7 +54,11 @@
 (defun change-element-name (name)
   (setf (element-name *modeline-element*) name))
 
-
+;; Add tag
+;; Add message
+;; Add cursor
+;; Add enable
+;; 
 (defstruct vi-state
   name
   keymap
@@ -115,7 +119,7 @@
 (defvar *insert-keymap* (make-keymap :name '*insert-keymap* :parent *global-keymap*))
 (defvar *inactive-keymap* (make-keymap :parent *global-keymap*))
 
-(define-vi-state command (:keymap *command-keymap*))
+(define-vi-state normal (:keymap *command-keymap*))
 
 (define-vi-state insert (:keymap *insert-keymap* :cursor-color "IndianRed")
   (:enable () (message " -- INSERT --")))
@@ -123,7 +127,7 @@
 (define-vi-state modeline (:keymap *inactive-keymap*))
 
 (defun prompt-activate-hook () (change-state 'modeline))
-(defun prompt-deactivate-hook () (change-state 'command))
+(defun prompt-deactivate-hook () (change-state 'normal))
 
 (defun vi-post-command-hook ()
   (alexandria:when-let ((it (vi-state-post-command-hook
@@ -138,7 +142,7 @@
 (add-hook *enable-hook*
           (lambda ()
             (initialize-vi-modeline)
-            (change-state 'command)
+            (change-state 'normal)
             (add-hook *prompt-activate-hook* 'prompt-activate-hook)
             (add-hook *prompt-deactivate-hook* 'prompt-deactivate-hook)))
 

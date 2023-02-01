@@ -25,10 +25,10 @@
 (defclass primary-command () ())
 
 (defun register-command-class (symbol class-name)
-  (setf (get symbol 'command-class) class-name))
+  (setf (get symbol 'normal-class) class-name))
 
 (defun get-command-class (symbol)
-  (get symbol 'command-class))
+  (get symbol 'normal-class))
 
 (defun get-command (symbol)
   (alexandria:when-let (class (get-command-class symbol))

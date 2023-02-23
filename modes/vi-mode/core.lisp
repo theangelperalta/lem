@@ -14,6 +14,8 @@
            :*insert-keymap*
            :*inactive-keymap*
            :post-command-hook
+           :e-hook
+           :d-hook
            :normal
            :insert))
 (in-package :lem-vi-mode.core)
@@ -74,21 +76,14 @@
   (keymap
   :initarg :keymap
   :reader kmap)
-  (enable-hook
-  :initarg :enable-hook
-  :accessor e-hook)
-  (disable-hook
-  :initarg :disable-hook
-  :accessor d-hook)
   (cursor-color
   :initarg :cursor-color
   :accessor cursor-color)))
 
 (defvar *current-state* nil)
 
+;;; vi-state methods
 (defmacro define-vi-state (name (&key tag message cursor-type keymap cursor-color) &body spec)
-  (let ((enable-form (rest (assoc :enable spec)))
-        (disable-form (rest (assoc :disable spec))))
     `(progn
       (cl-package-locks:without-package-locks
        (defclass ,name (vi-state) ()))
@@ -98,13 +93,19 @@
                           :message ,message
                           :cursor-type ,cursor-type
                           :keymap ,keymap
-                          :enable-hook ,(if enable-form `(lambda ,@enable-form))
-                          :disable-hook ,(if disable-form `(lambda ,@disable-form))
-                          :cursor-color ,cursor-color)))))
+                          :cursor-color ,cursor-color))))
 
 (defgeneric post-command-hook (state))
 
 (defmethod post-command-hook ((state vi-state)))
+
+(defgeneric e-hook (state &rest args))
+
+(defmethod e-hook ((state vi-state) &rest args))
+
+(defgeneric d-hook (state))
+
+(defmethod d-hook ((state vi-state)))
 
 (defun current-state ()
   *current-state*)
@@ -114,19 +115,17 @@
         (if (symbolp state)
             (get state 'state)
             state))
-  (assert (or (subtypep (type-of state) 'vi-state) (typep 'vi-state (class-of state))))
+  (assert (or (subtypep (type-of state) 'vi-state) (typep 'vi-state (type-of state))))
   state)
 
 (defun change-state (name &rest args)
-  (alexandria:when-let ((disable-hook (and *current-state*
-                                           (d-hook (ensure-state *current-state*)))))
-    (funcall disable-hook))
+  (and *current-state*
+      (d-hook (ensure-state *current-state*))) 
   (let ((state (ensure-state name)))
     (setf *current-state* name)
     (change-global-mode-keymap 'vi-mode (kmap state))
     (change-element-name (format nil "[~A]" name))
-    (when (e-hook state)
-      (apply (e-hook state) args))
+    (e-hook state args)
     (unless *default-cursor-color*
       (setf *default-cursor-color*
             (attribute-background (ensure-attribute 'cursor nil))))
@@ -147,8 +146,10 @@
 
 (define-vi-state normal (:keymap *command-keymap*))
 
-(define-vi-state insert (:keymap *insert-keymap* :cursor-color "IndianRed")
-  (:enable () (message " -- INSERT --")))
+(define-vi-state insert (:keymap *insert-keymap* :cursor-color "IndianRed"))
+
+(defmethod e-hook ((state insert) &rest args)
+  (message " -- INSERT --"))
 
 (define-vi-state modeline (:keymap *inactive-keymap*))
 

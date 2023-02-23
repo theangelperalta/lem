@@ -29,13 +29,15 @@
 (define-key *visual-keymap* "U" 'vi-visual-upcase)
 (define-key *visual-keymap* "u" 'vi-visual-downcase)
 
-(define-vi-state visual (:keymap *visual-keymap*)
-  (:disable ()
+(define-vi-state visual (:keymap *visual-keymap*))
+
+(defmethod e-hook ((state visual) &rest args)
+   (setf *set-visual-function* (caar args))
+   (setf *start-point* (copy-point (current-point))))
+
+(defmethod d-hook ((state visual))
    (delete-point *start-point*)
    (clear-visual-overlays))
-  (:enable (function)
-   (setf *set-visual-function* function)
-   (setf *start-point* (copy-point (current-point)))))
 
 (defun disable ()
   (clear-visual-overlays))

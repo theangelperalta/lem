@@ -16,8 +16,7 @@
            :post-command-hook
            :e-hook
            :d-hook
-           :normal
-           :insert))
+           :normal))
 (in-package :lem-vi-mode.core)
 
 (defvar *default-cursor-color* nil)
@@ -141,15 +140,7 @@
 
 (defvar *command-keymap* (make-keymap :name '*command-keymap*
                                       :parent *global-keymap*))
-(defvar *insert-keymap* (make-keymap :name '*insert-keymap* :parent *global-keymap*))
 (defvar *inactive-keymap* (make-keymap :parent *global-keymap*))
-
-(define-vi-state normal (:keymap *command-keymap*))
-
-(define-vi-state insert (:keymap *insert-keymap* :cursor-color "IndianRed"))
-
-(defmethod e-hook ((state insert) &rest args)
-  (message " -- INSERT --"))
 
 (define-vi-state modeline (:keymap *inactive-keymap*))
 

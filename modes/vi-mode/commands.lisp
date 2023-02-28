@@ -5,7 +5,8 @@
         :lem.show-paren
         :lem-vi-mode.core
         :lem-vi-mode.word
-        :lem-vi-mode.visual
+        :lem-vi-mode.state.visual
+        :lem-vi-mode.state.insert
         :lem-vi-mode.jump-motions)
   (:export :vi-move-to-beginning-of-line/universal-argument-0
            :vi-forward-char

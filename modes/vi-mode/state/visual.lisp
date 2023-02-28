@@ -1,4 +1,4 @@
-(defpackage :lem-vi-mode.visual
+(defpackage :lem-vi-mode.state.visual
   (:use :cl
         :lem
         :lem-vi-mode.core)
@@ -15,7 +15,7 @@
            :vi-visual-append
            :vi-visual-upcase
            :vi-visual-downcase))
-(in-package :lem-vi-mode.visual)
+(in-package :lem-vi-mode.state.visual)
 
 (defvar *set-visual-function* nil)
 (defvar *start-point* nil)

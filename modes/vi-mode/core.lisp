@@ -1,7 +1,7 @@
 (defpackage :lem-vi-mode.core
   (:use :cl
         :lem
-        :lem.universal-argument)
+        :lem/universal-argument)
   (:import-from :cl-package-locks)
   (:export :*enable-hook*
            :*disable-hook*

@@ -60,6 +60,9 @@
    (switch-to-buffer-hook
     :initform nil
     :accessor window-switch-to-buffer-hook)
+   (leave-hook
+    :initform nil
+    :accessor window-leave-hook)
    (use-modeline-p
     :initarg :use-modeline-p
     :initform nil
@@ -68,6 +71,10 @@
    (modeline-format
     :initform nil
     :accessor window-modeline-format)
+   (cursor-invisible
+    :initform nil
+    :initarg :cursor-invisible
+    :accessor window-cursor-invisible-p)
    (parameters
     :initform nil
     :accessor window-parameters)))
@@ -154,8 +161,9 @@
 (defun (setf current-window) (new-window)
   (check-type new-window window)
   (notify-frame-redisplay-required (current-frame))
-  (let ((frame (current-frame)))
-    (alexandria:when-let (old-window (frame-current-window frame))
+  (let* ((frame (current-frame))
+         (old-window (frame-current-window frame)))
+    (when old-window
       (move-point (%window-point old-window)
                   (window-buffer-point old-window)))
     (let ((buffer (window-buffer new-window)))
@@ -1093,6 +1101,11 @@ window width is changed, we must recalc the window view point."
     :initarg :border
     :initform 0
     :reader floating-window-border)
+   (border-shape
+    :type (member nil :drop-curtain)
+    :initarg :border-shape
+    :initform nil
+    :reader floating-window-border-shape)
    (background-color
     :initarg :background-color
     :initform nil
@@ -1108,13 +1121,21 @@ window width is changed, we must recalc the window view point."
                                        &key (frame (current-frame)) &allow-other-keys)
   (add-floating-window frame floating-window))
 
+(defmethod initialize-instance ((floating-window floating-window) &rest initargs &key use-border &allow-other-keys)
+  (apply #'call-next-method
+         floating-window
+         (if use-border
+             (list* :border 1 initargs)
+             initargs)))
+
 (defun make-floating-window (&key (buffer (alexandria:required-argument :buffer))
                                   (x (alexandria:required-argument :x))
                                   (y (alexandria:required-argument :y))
                                   (width (alexandria:required-argument :width))
                                   (height (alexandria:required-argument :height))
                                   (use-modeline-p nil)
-                                  (background-color nil))
+                                  (background-color nil)
+                                  (use-border nil))
   (make-instance 'floating-window
                  :buffer buffer
                  :x x
@@ -1122,7 +1143,8 @@ window width is changed, we must recalc the window view point."
                  :width width
                  :height height
                  :use-modeline-p use-modeline-p
-                 :background-color background-color))
+                 :background-color background-color
+                 :border (if use-border 1 0)))
 
 (defmethod %delete-window ((window floating-window))
   (when (eq window (current-window))

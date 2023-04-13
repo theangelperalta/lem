@@ -1,10 +1,8 @@
-(defpackage :lem.popup-window
+(defpackage :lem/popup-window
   (:use :cl :lem)
-  (:export :get-focus-item
-           :apply-print-spec)
   #+sbcl
   (:lock t))
-(in-package :lem.popup-window)
+(in-package :lem/popup-window)
 
 (defconstant +border-size+ 1)
 (defconstant +min-width+   3)
@@ -12,33 +10,6 @@
 
 (defvar *extra-right-margin* 0)
 (defvar *extra-width-margin* 0)
-
-(defvar *popup-menu* nil)
-
-(defclass popup-menu ()
-  ((buffer
-    :initarg :buffer
-    :accessor popup-menu-buffer)
-   (window
-    :initarg :window
-    :accessor popup-menu-window)
-   (focus-overlay
-    :initarg :focus-overlay
-    :accessor popup-menu-focus-overlay)
-   (action-callback
-    :initarg :action-callback
-    :accessor popup-menu-action-callback)
-   (focus-attribute
-    :initarg :focus-attribute
-    :accessor popup-menu-focus-attribute)
-   (non-focus-attribute
-    :initarg :non-focus-attribute
-    :accessor popup-menu-non-focus-attribute)))
-
-(define-attribute popup-menu-attribute
-  (t :foreground "white" :background "RoyalBlue"))
-(define-attribute non-focus-popup-menu-attribute
-  (t :background "#444" :foreground "white"))
 
 (defgeneric adjust-for-redrawing (gravity popup-window)
   (:method (gravity popup-window)))
@@ -53,7 +24,8 @@
 (defclass gravity-topright (gravity) ())
 (defclass gravity-cursor (gravity) ())
 (defclass gravity-follow-cursor (gravity-cursor) ())
-(defclass gravity-adjacent-window (gravity) ())
+(defclass gravity-vertically-adjacent-window (gravity) ())
+(defclass gravity-horizontally-adjacent-window (gravity) ())
 
 (defclass popup-window (floating-window)
   ((gravity
@@ -84,7 +56,8 @@
         (:topright (make-instance 'gravity-topright))
         (:cursor (make-instance 'gravity-cursor))
         (:follow-cursor (make-instance 'gravity-follow-cursor))
-        (:adjacent-window (make-instance 'gravity-adjacent-window)))))
+        (:vertically-adjacent-window (make-instance 'gravity-vertically-adjacent-window))
+        (:horizontally-adjacent-window (make-instance 'gravity-horizontally-adjacent-window)))))
 
 (defmethod adjust-for-redrawing ((gravity gravity-follow-cursor) popup-window)
   (destructuring-bind (x y width height)
@@ -192,13 +165,37 @@
       (setf w (min width win-w)))
     (list x y w h)))
 
-(defmethod compute-popup-window-rectangle ((gravity gravity-adjacent-window)
+(defmethod compute-popup-window-rectangle ((gravity gravity-vertically-adjacent-window)
                                            &key source-window width height #+(or)border-size
                                            &allow-other-keys)
   (let ((x (+ (window-x source-window)
               (window-width source-window)))
         (y (window-y source-window)))
     (list x y width height)))
+
+(defmethod compute-popup-window-rectangle ((gravity gravity-horizontally-adjacent-window)
+                                           &key source-window width height border-size
+                                           &allow-other-keys)
+  (let ((x (- (window-x source-window) border-size))
+        (y (+ (window-y source-window)
+              (window-height source-window)
+              border-size)))
+    (list x
+          y
+          (max width (window-width source-window))
+          height)))
+
+(defun compute-buffer-width (buffer)
+  (with-point ((point (buffer-start-point buffer)))
+    (loop :maximize (point-column (line-end point))
+          :while (line-offset point 1))))
+
+(defun compute-buffer-height (buffer)
+  (buffer-nlines buffer))
+
+(defun compute-buffer-size (buffer)
+  (list (compute-buffer-width buffer)
+        (compute-buffer-height buffer)))
 
 (defmethod window-redraw ((popup-window popup-window) force)
   (adjust-for-redrawing (popup-window-gravity popup-window) popup-window)
@@ -209,11 +206,15 @@
   (use-border t)
   (background-color nil)
   (offset-x 0)
-  (offset-y 0))
+  (offset-y 0)
+  (cursor-invisible nil)
+  shape)
 
 (defun merge-style (style &key (gravity nil gravity-p)
                                (use-border nil use-border-p)
-                               (background-color nil background-color-p))
+                               (background-color nil background-color-p)
+                               (cursor-invisible nil cursor-invisible-p)
+                               (shape nil shape-p))
   (make-style :gravity (if gravity-p
                            gravity
                            (style-gravity style))
@@ -224,7 +225,13 @@
                                     background-color
                                     (style-background-color style))
               :offset-x (style-offset-x style)
-              :offset-y (style-offset-y style)))
+              :offset-y (style-offset-y style)
+              :cursor-invisible (if cursor-invisible-p
+                                    cursor-invisible
+                                    (style-cursor-invisible style))
+              :shape (if shape-p
+                         shape
+                         (style-shape style))))
 
 (defun ensure-style (style)
   (cond ((null style)
@@ -262,7 +269,9 @@
                      :base-width  width
                      :base-height height
                      :border border-size
+                     :border-shape (style-shape style)
                      :background-color (style-background-color style)
+                     :cursor-invisible (style-cursor-invisible style)
                      :style style))))
 
 (defun update-popup-window (&key (source-window (alexandria:required-argument :source-window))
@@ -286,251 +295,3 @@
                            (+ x border-size)
                            (+ y border-size))
       destination-window)))
-
-(defun focus-point (popup-menu)
-  (buffer-point (popup-menu-buffer popup-menu)))
-
-(defun make-focus-overlay (point focus-attribute)
-  (with-point ((start point)
-               (end point))
-    (line-start start)
-    (line-end end)
-    (make-overlay start end focus-attribute)))
-
-(defun update-focus-overlay (popup-menu point)
-  (delete-overlay (popup-menu-focus-overlay popup-menu))
-  (setf (popup-menu-focus-overlay popup-menu)
-        (make-focus-overlay point (popup-menu-focus-attribute popup-menu))))
-
-(defgeneric apply-print-spec (print-spec point item)
-  (:method ((print-spec function) point item)
-    (let ((string (funcall print-spec item)))
-      (insert-string point string))))
-
-(defun fill-background-color (buffer non-focus-attribute)
-  (with-point ((p (buffer-start-point buffer))
-               (start (buffer-start-point buffer)))
-    (flet ((put-attribute (start end attribute)
-             (put-text-property
-              start end
-              :attribute (make-attribute
-                          :foreground
-                          (or (and attribute
-                                   (attribute-foreground attribute))
-                              (attribute-foreground non-focus-attribute))
-                          :background (attribute-background non-focus-attribute)
-                          :bold-p (and attribute
-                                       (attribute-bold-p attribute))
-                          :underline-p (and attribute
-                                            (attribute-underline-p attribute))))))
-      (loop
-        (let ((start-attribute (ensure-attribute (text-property-at p :attribute) nil)))
-          (unless (next-single-property-change p :attribute)
-            (put-attribute start (buffer-end-point buffer) start-attribute)
-            (return))
-          (put-attribute start p start-attribute)
-          (move-point start p))))))
-
-(defun compute-buffer-width (buffer)
-  (with-point ((point (buffer-start-point buffer)))
-    (loop :maximize (point-column (line-end point))
-          :while (line-offset point 1))))
-
-(defun fill-in-the-background-with-space (buffer)
-  (labels ((fill-space (width)
-             (with-point ((point (buffer-start-point buffer) :left-inserting))
-               (loop :do (move-to-column point width t)
-                     :while (line-offset point 1)))))
-    (let ((width (compute-buffer-width buffer)))
-      (fill-space width)
-      width)))
-
-(defun fill-background (buffer non-focus-attribute)
-  (let ((width (fill-in-the-background-with-space buffer)))
-    (fill-background-color buffer non-focus-attribute)
-    width))
-
-(defun insert-items (point items print-spec)
-  (with-point ((start point :right-inserting))
-    (loop :for (item . continue-p) :on items
-          :do (move-point start point)
-              (apply-print-spec print-spec point item)
-              (line-end point)
-              (put-text-property start point :item item)
-              (when continue-p
-                (insert-character point #\newline)))
-    (buffer-start point)))
-
-(defun get-focus-item ()
-  (when *popup-menu*
-    (alexandria:when-let (p (focus-point *popup-menu*))
-      (text-property-at (line-start p) :item))))
-
-(defun make-menu-buffer ()
-  (make-buffer "*popup menu*" :enable-undo-p nil :temporary t))
-
-(defun setup-menu-buffer (buffer items print-spec focus-attribute non-focus-attribute)
-  (clear-overlays buffer)
-  (erase-buffer buffer)
-  (setf (variable-value 'line-wrap :buffer buffer) nil)
-  (insert-items (buffer-point buffer) items print-spec)
-  (let ((focus-overlay (make-focus-overlay (buffer-start-point buffer) focus-attribute))
-        (width (fill-background buffer non-focus-attribute)))
-    (values width
-            focus-overlay)))
-
-(defmethod lem-if:display-popup-menu (implementation items
-                                      &key action-callback
-                                           print-spec
-                                           (focus-attribute 'popup-menu-attribute)
-                                           (non-focus-attribute 'non-focus-popup-menu-attribute)
-                                           style)
-  (when *popup-menu*
-    (lem-if:popup-menu-quit implementation))
-  (let ((style (ensure-style style))
-        (focus-attribute (ensure-attribute focus-attribute))
-        (non-focus-attribute (ensure-attribute non-focus-attribute))
-        (buffer (make-menu-buffer)))
-    (multiple-value-bind (menu-width focus-overlay)
-        (setup-menu-buffer buffer
-                           items
-                           print-spec
-                           focus-attribute
-                           non-focus-attribute)
-      (let ((window (make-popup-window :source-window (current-window)
-                                       :buffer buffer
-                                       :width menu-width
-                                       :height (min 20 (length items))
-                                       :style (merge-style
-                                               style
-                                               :background-color (or (style-background-color style)
-                                                                     (attribute-background
-                                                                      non-focus-attribute))))))
-        (setf *popup-menu*
-              (make-instance 'popup-menu
-                             :buffer buffer
-                             :window window
-                             :focus-overlay focus-overlay
-                             :action-callback action-callback
-                             :focus-attribute focus-attribute
-                             :non-focus-attribute non-focus-attribute))))))
-
-(defmethod lem-if:popup-menu-update (implementation items &key print-spec)
-  (when *popup-menu*
-    (multiple-value-bind (menu-width focus-overlay)
-        (setup-menu-buffer (popup-menu-buffer *popup-menu*)
-                           items
-                           print-spec
-                           (popup-menu-focus-attribute *popup-menu*)
-                           (popup-menu-non-focus-attribute *popup-menu*))
-      (setf (popup-menu-focus-overlay *popup-menu*) focus-overlay)
-      (let ((source-window (current-window)))
-        (when (eq source-window
-                  (frame-prompt-window (current-frame)))
-          ;; prompt-window内でcompletion-windowを出している場合,
-          ;; completion-windowの位置を決める前にprompt-windowの調整を先にしておかないとずれるため,
-          ;; ここで更新する
-          (lem::update-floating-prompt-window (current-frame)))
-        (update-popup-window :source-window source-window
-                             :width menu-width
-                             :height (min 20 (length items))
-                             :destination-window (popup-menu-window *popup-menu*))))))
-
-(defmethod lem-if:popup-menu-quit (implementation)
-  (when *popup-menu*
-    (delete-window (popup-menu-window *popup-menu*))
-    (delete-buffer (popup-menu-buffer *popup-menu*))
-    (setf *popup-menu* nil)))
-
-(defun move-focus (popup-menu function)
-  (alexandria:when-let (point (focus-point popup-menu))
-    (funcall function point)
-    (window-see (popup-menu-window popup-menu))
-    (update-focus-overlay popup-menu point)))
-
-(defmethod lem-if:popup-menu-down (implementation)
-  (move-focus
-   *popup-menu*
-   (lambda (point)
-     (unless (line-offset point 1)
-       (buffer-start point)))))
-
-(defmethod lem-if:popup-menu-up (implementation)
-  (move-focus
-   *popup-menu*
-   (lambda (point)
-     (unless (line-offset point -1)
-       (buffer-end point)))))
-
-(defmethod lem-if:popup-menu-first (implementation)
-  (move-focus
-   *popup-menu*
-   (lambda (point)
-     (buffer-start point))))
-
-(defmethod lem-if:popup-menu-last (implementation)
-  (move-focus
-   *popup-menu*
-   (lambda (point)
-     (buffer-end point))))
-
-(defmethod lem-if:popup-menu-select (implementation)
-  (alexandria:when-let ((f (popup-menu-action-callback *popup-menu*))
-                        (item (get-focus-item)))
-    (funcall f item)))
-
-(defun compute-size-from-buffer (buffer)
-  (let ((width (compute-buffer-width buffer))
-        (height (buffer-nlines buffer)))
-    (list width height)))
-
-(defun make-popup-buffer (text)
-  (let ((buffer (make-buffer "*Popup Message*" :temporary t :enable-undo-p nil)))
-    (setf (variable-value 'line-wrap :buffer buffer) nil)
-    (erase-buffer buffer)
-    (insert-string (buffer-point buffer) text)
-    (buffer-start (buffer-point buffer))
-    buffer))
-
-(defmethod lem-if:display-popup-message (implementation buffer-or-string
-                                         &key timeout
-                                              destination-window
-                                              source-window
-                                              style)
-  (let ((buffer (etypecase buffer-or-string
-                  (string (make-popup-buffer buffer-or-string))
-                  (buffer buffer-or-string))))
-    (destructuring-bind (width height)
-        (compute-size-from-buffer buffer)
-      (delete-popup-message destination-window)
-      (let ((window (make-popup-window :source-window (or source-window (current-window))
-                                       :buffer buffer
-                                       :width width
-                                       :height height
-                                       :style style)))
-        (buffer-start (window-view-point window))
-        (window-see window)
-        (when timeout
-          (check-type timeout number)
-          (start-timer (make-timer (lambda ()
-                                     (unless (deleted-window-p window)
-                                       (delete-window window))))
-                       (round (* timeout 1000))))
-        window))))
-
-(defmethod lem-if:delete-popup-message (implementation popup-message)
-  (when (and popup-message (not (deleted-window-p popup-message)))
-    (delete-window popup-message)))
-
-(defmethod lem:show-message (value &rest args &key timeout (style '(:gravity :follow-cursor)))
-  (setf (frame-message-window (current-frame))
-        (apply #'display-popup-message
-               value
-               :destination-window (frame-message-window (current-frame))
-               :style style
-               :timeout timeout
-               args)))
-
-(defmethod lem:clear-message ()
-  (delete-popup-message (frame-message-window (current-frame)))
-  (setf (frame-message-window (current-frame)) nil))

@@ -7,7 +7,7 @@
                 :register-eval-methods))
 (in-package :lem-lisp-mode/v2/lsp-config)
 
-(defvar *self-connection* nil)
+(defvar *self-connection* t)
 
 (define-language-spec (lisp-spec lem-lisp-mode:lisp-mode)
   :language-id "lisp"
@@ -20,12 +20,27 @@
                "--log-file" ,(namestring
                               (merge-pathnames "language-server.log"
                                                (lem:lem-logdir-pathname)))))
-  :mode :tcp)
+  :connection-mode :tcp)
+
+(defun connection-workspace (connection)
+  (lem-lisp-mode:connection-value connection 'workspace))
+
+(defun (setf connection-workspace) (workspace connection)
+  (setf (lem-lisp-mode:connection-value connection 'workspace) workspace))
+
+(defun self-connection-p (workspace)
+  (lem-lsp-mode::workspace-value workspace 'self-connection *self-connection*))
+
+(defun (setf self-connection-p) (value workspace)
+  (setf (lem-lsp-mode::workspace-value workspace 'self-connection) value))
 
 (defmethod lem-lsp-mode::initialized-workspace ((mode lem-lisp-mode:lisp-mode) workspace)
-  (unless *self-connection*
-    (let ((swank-port (gethash "swankPort" (lem-lsp-mode::workspace-server-info workspace))))
-      (lem-lisp-mode:connect-to-swank "localhost" swank-port)))
+  (if (self-connection-p workspace)
+      (let ((connection (lem-lisp-mode::self-connection)))
+        (setf (connection-workspace connection) workspace))
+      (let* ((swank-port (gethash "swankPort" (lem-lsp-mode::workspace-server-info workspace)))
+             (connection (lem-lisp-mode:connect-to-swank "127.0.0.1" swank-port)))
+        (setf (connection-workspace connection) workspace)))
   (register-eval-methods workspace))
 
 (defun start-micros-server (port)
@@ -46,8 +61,30 @@
              (micros-port (lem-socket-utils:random-available-port lsp-port)))
         (start-language-server lsp-port)
         (start-micros-server micros-port)
-        (lem-lsp-mode::make-server-info :port lsp-port))))
+        (make-instance 'lem-lsp-mode/client:tcp-client :port lsp-port))))
+
+(defmethod lem-lisp-mode::switch-connection :after ((connection lem-lisp-mode::connection))
+  (let ((workspace (connection-workspace connection)))
+    (lem-lsp-mode::change-workspace workspace)))
 
 ;; override lisp-mode autodoc
 (defmethod lem:execute :after ((mode lem-lisp-mode:lisp-mode) (command lem:self-insert) argument)
   )
+
+(defun reinitialize-all-lisp-buffers ()
+  (dolist (buffer (buffer-list))
+    (when (mode-active-p buffer 'lem-lisp-mode:lisp-mode)
+      (lem-lsp-mode::reopen-buffer buffer))))
+
+(define-command lisp/new-workspace () ()
+  (let ((*self-connection* nil))
+    (let* ((spec (lem-lsp-mode/spec:get-language-spec 'lem-lisp-mode:lisp-mode))
+           (client (lem-lsp-mode::run-server spec))
+           (workspace (lem-lsp-mode::make-workspace :spec spec
+                                                    :client client
+                                                    :buffer (current-buffer))))
+      (setf (self-connection-p workspace) nil)
+      (lem-lsp-mode::connect-and-initialize workspace
+                                            (current-buffer)
+                                            (lambda ()
+                                              (reinitialize-all-lisp-buffers))))))

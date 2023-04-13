@@ -68,24 +68,22 @@
 (defgeneric lem-if:display-popup-menu (implementation items
                                        &key action-callback
                                             print-spec
-                                            focus-attribute
-                                            non-focus-attribute
-                                            style))
-(defgeneric lem-if:popup-menu-update (implementation items &key print-spec))
-(defgeneric lem-if:popup-menu-quit (implementation))
-(defgeneric lem-if:popup-menu-down (implementation))
-(defgeneric lem-if:popup-menu-up (implementation))
-(defgeneric lem-if:popup-menu-first (implementation))
-(defgeneric lem-if:popup-menu-last (implementation))
-(defgeneric lem-if:popup-menu-select (implementation))
+                                            style
+                                            max-display-items))
+(defgeneric lem-if:popup-menu-update (implementation popup-menu items &key print-spec max-display-items keep-focus))
+(defgeneric lem-if:popup-menu-quit (implementation popup-menu))
+(defgeneric lem-if:popup-menu-down (implementation popup-menu))
+(defgeneric lem-if:popup-menu-up (implementation popup-menu))
+(defgeneric lem-if:popup-menu-first (implementation popup-menu))
+(defgeneric lem-if:popup-menu-last (implementation popup-menu))
+(defgeneric lem-if:popup-menu-select (implementation popup-menu))
 (defgeneric lem-if:display-popup-message (implementation buffer-or-string &key timeout
                                                                                destination-window
                                                                                source-window
                                                                                style))
 (defgeneric lem-if:delete-popup-message (implementation popup-message))
-
-(defgeneric lem-if:display-menu (implementation menu name))
-(defgeneric lem-if:update-menu (implementation menu items))
+(defgeneric lem-if:display-context-menu (implementation context-menu)
+  (:method (implementation context-menu)))
 
 (defgeneric lem-if:clipboard-paste (implementation)
   (:method (implementation)))
@@ -122,7 +120,5 @@
 
 (defun invoke-frontend (function &key (implementation
                                        (get-default-implementation)))
-  (let ((bt:*default-special-bindings*
-          `((*implementation* . ,implementation)
-            ,@bt:*default-special-bindings*)))
-    (lem-if:invoke implementation function)))
+  (setf *implementation* implementation)
+  (lem-if:invoke implementation function))

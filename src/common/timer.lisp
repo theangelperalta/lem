@@ -13,7 +13,9 @@
            :stop-timer
            :with-idle-timers
            :update-idle-timers
-           :get-next-timer-timing-ms))
+           :get-next-timer-timing-ms)
+  #+sbcl
+  (:lock t))
 (in-package :lem/common/timer)
 
 (defvar *timer-manager*)
@@ -29,11 +31,8 @@
              (load-time-value (/ internal-time-units-per-second 1000))))))
 
 (defun call-with-timer-manager (timer-manager function)
-  (let ((*timer-manager* timer-manager)
-        (bt:*default-special-bindings* (acons '*timer-manager*
-                                              timer-manager
-                                              bt:*default-special-bindings*)))
-    (funcall function)))
+  (setf *timer-manager* timer-manager)
+  (funcall function))
 
 (defmacro with-timer-manager (timer-manager &body body)
   `(call-with-timer-manager ,timer-manager (lambda () ,@body)))

@@ -96,29 +96,6 @@
         (pushnew s symbols)))
     symbols))
 
-(defun select-menu (items)
-  (let (selected-item)
-    (display-popup-menu items
-                        :print-spec #'princ-to-string
-                        :action-callback (lambda (item)
-                                           (setf selected-item item)))
-    (loop
-      (redraw-display)
-      (let ((key (read-key)))
-        (cond ((or (match-key key :sym "Down")
-                   (match-key key :ctrl t :sym "n"))
-               (popup-menu-down))
-              ((or (match-key key :sym "Up")
-                   (match-key key :ctrl t :sym "p"))
-               (popup-menu-up))
-              ((match-key key :sym "Return")
-               (popup-menu-select)
-               (popup-menu-quit)
-               (return selected-item))
-              ((match-key key :sym "q")
-               (popup-menu-quit)
-               (return nil)))))))
-
 #|
 (define-command lisp-add-missing-import-from (symbol-name)
     ((list (prompt-for-symbol-name "Symbol: " (symbol-string-at-point (current-point)))))
@@ -151,7 +128,7 @@
                              (buffer-directory (current-buffer)))))
               (unless (probe-file filename)
                 (editor-error "~A does not exists" filename))
-              (lem.language-mode:make-xref-location
+              (lem/language-mode:make-xref-location
                :filespec (probe-file filename)
                :position (let ((buffer (find-file-buffer filename
                                                          :temporary t
@@ -174,3 +151,31 @@
 
 (define-command lisp-defstruct-to-defclass () ()
   (lem-lisp-syntax:defstruct-to-defclass (current-point)))
+
+
+(defun move-to-deftest-toplevel-form (point)
+  (or (looking-at point "\\(deftest\\s")
+      (progn (lisp-beginning-of-defun point 1)
+             (looking-at point "\\(deftest\\s"))))
+
+(defun get-deftest-name (point)
+  (with-point ((point point))
+    (when (and (move-to-deftest-toplevel-form point)
+               (scan-lists point 1 -1 t)
+               (form-offset point 1)
+               (skip-whitespace-forward point))
+      (with-point ((start point)
+                   (end point))
+        (form-offset end 1)
+        (points-to-string start end)))))
+
+(defparameter *run-test-function-name* "rove:run-test")
+
+(define-command lisp-run-test () ()
+  (let* ((package-name (buffer-package (current-buffer)))
+         (test-name (get-deftest-name (current-point)))
+         (form-string (format nil "(~A '~A::~A)" *run-test-function-name* package-name test-name)))
+    (start-lisp-repl)
+    (buffer-end (current-point))
+    (insert-string (current-point) form-string)
+    (lem/listener-mode:listener-return)))

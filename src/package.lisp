@@ -2,10 +2,19 @@
   (:use :cl
         :lem-base
         :lem/common/killring
-        :lem/common/timer)
+        :lem/common/timer
+        :lem/common/command)
   ;; reexport common/killring
   (:export
    :with-killring-context)
+  ;; reexport lem/common/command.lisp
+  (:export
+   :primary-command
+   :make-command-table
+   :add-command
+   :remove-command
+   :find-command
+   :exist-command-p)
   ;; quicklisp-utils.lisp
   (:export
    :maybe-quickload)
@@ -19,7 +28,8 @@
    :editor-abort)
   ;; system.lisp
   (:export
-   :get-pid)
+   :get-pid
+   :exist-program-p)
   ;; key.lisp
   (:export
    :make-key
@@ -153,6 +163,7 @@
    :last-print-cursor-y
    :window-parameter
    :window-delete-hook
+   :window-leave-hook
    :window-redraw
    :current-window
    :window-list
@@ -184,6 +195,7 @@
    :make-floating-window
    :floating-window
    :floating-window-border
+   :floating-window-border-shape
    :floating-window-p
    :header-window
    :redraw-display)
@@ -212,13 +224,6 @@
    :modeline-position
    :modeline-posline
    :convert-modeline-element)
-  ;; command-table.lisp
-  (:export
-   :make-command-table
-   :add-command
-   :remove-command
-   :find-command
-   :exist-command-p)
   ;; command.lisp
   (:export
    :handle-signal
@@ -226,13 +231,13 @@
    :after-executing-command
    :this-command
    :execute
-   :primary-command
    :call-command)
   ;; defcommand.lisp
   (:export
    :define-command)
   ;; mode.lisp
   (:export
+   :ensure-mode-object
    :major-mode
    :mode-name
    :mode-description
@@ -346,6 +351,7 @@
    :exit-lem
    :quick-exit
    :keyboard-quit
+   :escape
    :nop-command
    :unmark-buffer
    :*read-only-function*
@@ -397,7 +403,8 @@
    :filter-buffer
    :pipe-command
    :delete-trailing-whitespace
-   :load-library)
+   :load-library
+   :show-context-menu)
   ;; self-insert-command.lisp
   (:export
    :self-insert-before-hook
@@ -537,9 +544,8 @@
    :popup-menu-last
    :popup-menu-select
    :display-popup-message
-   :display-menu
-   :update-menu
    :delete-popup-message
+   :display-context-menu
    :clipboard-paste
    :clipboard-copy))
 

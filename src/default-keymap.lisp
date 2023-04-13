@@ -45,6 +45,7 @@
 (define-key *global-keymap* "M-m" 'back-to-indentation-command)
 (define-key *global-keymap* "C-\\" 'undo)
 (define-key *global-keymap* "C-_" 'redo)
+(define-key *global-keymap* "C-/" 'redo)
 (define-key *global-keymap* "C-@" 'mark-set)
 (define-key *global-keymap* "C-Space" 'mark-set)
 (define-key *global-keymap* "C-x C-x" 'exchange-point-mark)
@@ -68,7 +69,7 @@
 (define-key *global-keymap* "C-x 2" 'split-active-window-vertically)
 (define-key *global-keymap* "C-x 3" 'split-active-window-horizontally)
 (define-key *global-keymap* "C-x o" 'other-window)
-(define-key *global-keymap* "M-o" 'other-window-or-split-window)
+(define-key *global-keymap* "M-o" 'other-window)
 (define-key *global-keymap* "C-x 1" 'delete-other-windows)
 (define-key *global-keymap* "C-x 0" 'delete-active-window)
 (define-key *global-keymap* "C-x ^" 'grow-window)
@@ -117,3 +118,5 @@
 (define-key *global-keymap* "M-x" 'execute-command)
 
 (define-key *global-keymap* "M-C" 'add-cursors-to-next-line)
+
+(define-key *global-keymap* "Shift-F10" 'show-context-menu)

@@ -8,7 +8,7 @@
                (:file "state/visual")
                (:file "state/ex")
                (:file "jump-motions")
-               (:file "commands")
+               (:file "command/commands")
                (:file "ex/ex-core")
                (:file "ex/ex-parser")
                (:file "ex/ex-command")

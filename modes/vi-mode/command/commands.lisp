@@ -429,7 +429,7 @@
          (insert-character p #\space)))))
 
 (let ((tag (gensym)))
-  (define-command vi-yank (&optional (n 1)) ("p")
+  (define-vi-operator vi-yank (&optional (n 1)) ("p")
     (cond (*vi-yank-recursive*
            ;; TODO: universal argument
            (with-point ((start (current-point))

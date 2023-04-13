@@ -7,6 +7,7 @@
            :*disable-hook*
            :vi-mode
            :define-vi-state
+           :define-vi-operator
            :current-state
            :change-state
            :with-state
@@ -80,6 +81,47 @@
   :accessor cursor-color)))
 
 (defvar *current-state* nil)
+
+(defmacro %define-vi-action (&whole form vi-action name-and-options params (&rest arg-descriptors) &body body)
+  (destructuring-bind (name . options) (uiop:ensure-list name-and-options)
+    (let ((primary-class (lem::primary-class options))
+          (advice-classes (alexandria:assoc-value options :advice-classes))
+          (class-name (alexandria:if-let (elt (assoc :class options))
+                        (second elt)
+                        name))
+          (command-name (alexandria:if-let (elt (assoc :name options))
+                          (second elt)
+                          (string-downcase name))))
+                          `(define-command (,class-name (:primary-class ,vi-action) (:advice-classes ,primary-class ,@advice-classes)) ,params ,arg-descriptors
+                           ,@body))))
+
+(defclass vi-action () ())
+
+(defmacro define-vi-action (&whole form name-and-options params (&rest arg-descriptors) &body body)
+  `(%define-vi-action vi-action ,name-and-options ,params ,arg-descriptors ,@body))
+
+(defmethod execute :before (mode (command vi-action) argument)
+  (message "Hello World"))
+
+(defclass vi-operator (vi-action) ())
+
+(defmacro define-vi-operator (&whole form name-and-options params (&rest arg-descriptors) &body body)
+  `(%define-vi-action vi-operator ,name-and-options ,params ,arg-descriptors ,@body))
+;; A command is something like <Esc>, :, v, i, etc.
+(defclass vi-command (vi-action) ())
+
+(defmacro define-vi-command (&whole form name-and-options params (&rest arg-descriptors) &body body)
+  `(%define-vi-action vi-command ,name-and-options ,params ,arg-descriptors ,@body))
+;;;;;;;;;;;;;;;;;;;;;;;
+(defclass vi-motion (vi-command) ())
+
+(defmacro define-vi-motion (&whole form name-and-options params (&rest arg-descriptors) &body body)
+  `(%define-vi-action vi-motion ,name-and-options ,params ,arg-descriptors ,@body))
+
+(defclass vi-text-object (vi-motion) ())
+
+(defmacro define-vi-text-object (&whole form name-and-options params (&rest arg-descriptors) &body body)
+  `(%define-vi-action vi-text-object ,name-and-options ,params ,arg-descriptors ,@body))
 
 ;;; vi-state methods
 (defmacro define-vi-state (name (&key tag message cursor-type keymap cursor-color) &body spec)

@@ -6,6 +6,7 @@
                (:file "state/normal")
                (:file "state/insert")
                (:file "state/visual")
+               (:file "state/ex")
                (:file "jump-motions")
                (:file "commands")
                (:file "ex/ex-core")

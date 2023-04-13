@@ -34,9 +34,9 @@
 (define-key *command-keymap* "C-f" 'next-page)
 (define-key *command-keymap* "C-b" 'previous-page)
 
-;; Actions keys = ['v'];
+;; Commands keys = ['v'];
 (define-key *command-keymap* "v" 'vi-visual-char)
-;; Actions keys = ['V'];
+;; Commands keys = ['V'];
 (define-key *command-keymap* "V" 'vi-visual-line)
 (define-key *command-keymap* "C-v" 'vi-visual-block)
 ;; Commands keys = [['i'], ['<Insert>']];

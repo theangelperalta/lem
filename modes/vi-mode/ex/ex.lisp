@@ -2,13 +2,10 @@
   (:use :cl
         :lem
         :lem-vi-mode.core
+        :lem-vi-mode.state.ex
         :lem-vi-mode.ex-parser)
   (:export :vi-ex))
 (in-package :lem-vi-mode.ex)
-
-(defvar *ex-keymap* (make-keymap :name '*ex-keymap*))
-
-(define-vi-state ex (:keymap *ex-keymap*))
 
 (define-command vi-ex () ()
   (let ((directory (lem:buffer-directory)))

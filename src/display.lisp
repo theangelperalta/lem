@@ -53,6 +53,16 @@
                  (< start-charpos end-charpos)))
     (destructuring-bind (string . attributes)
         (aref (screen-lines screen) screen-row)
+
+      (unless end-charpos
+        (let* ((width (string-width string))
+               (n (1+ (floor width (screen-width screen)))))
+          (setf end-charpos
+                (+ (length string)
+                   (- (- (* (screen-width screen) n) (1- n))
+                      width)
+                   -1))))
+
       (when (and end-charpos (<= (length string) end-charpos))
         (setf (car (aref (screen-lines screen) screen-row))
               (concatenate 'string
@@ -63,11 +73,11 @@
             (if transparency
                 (overlay-attributes attributes
                                     start-charpos
-                                    (or end-charpos (length string))
+                                    end-charpos
                                     attribute)
                 (lem-base::put-elements attributes
                                         start-charpos
-                                        (or end-charpos (length string))
+                                        end-charpos
                                         attribute))))))
 
 (defun draw-attribute-to-screen-region (screen attribute screen-row start end)
@@ -100,7 +110,16 @@
 (defun draw-window-overlays-to-screen (window)
   (let ((screen (window-screen window))
         (view-point (window-view-point window)))
-    (flet ((calc-row (curr-point) (count-lines view-point curr-point)))
+    (flet ((calc-row (curr-point) (count-lines view-point curr-point))
+           (cover (str/attributes str attribute offset)
+             (let ((space (make-string offset :initial-element #\space)))
+               (cons (concatenate 'string (car str/attributes) space str)
+                     (lem-base::put-elements (cdr str/attributes)
+                                             (+ (length (car str/attributes)) (length space))
+                                             (+ (length (car str/attributes))
+                                                (length space)
+                                                (length str))
+                                             attribute)))))
       (let ((left-width 0)
             (view-end-point (with-point ((view-point view-point))
                               (or (line-offset view-point (screen-height screen))
@@ -118,14 +137,29 @@
                              (setf left-width (max left-width (length str)))
                              (setf (aref (screen-left-lines screen) i)
                                    (cons str (overlay-attribute overlay))))))))
+                    ((overlay-get overlay :display-line-end)
+                     (when (and (point<= view-point start)
+                                (point<= end view-end-point))
+                       (let ((i (calc-row end)))
+                         (when (< i (screen-height screen))
+                           (let ((str (overlay-get overlay :text)))
+                             (setf (aref (screen-lines screen) i)
+                                   (cover (aref (screen-lines screen) i)
+                                          str
+                                          (overlay-attribute overlay)
+                                          (or (overlay-get overlay :display-line-end-offset) 0))))))))
                     ((and (same-line-p start end)
                           (point<= view-point start)
                           (point< start view-end-point))
                      (draw-attribute-to-screen-line screen
                                                     (overlay-attribute overlay)
                                                     (calc-row start)
-                                                    (point-charpos start)
-                                                    (point-charpos end)))
+                                                    (if (overlay-get overlay :display-line)
+                                                        0
+                                                        (point-charpos start))
+                                                    (if (overlay-get overlay :display-line)
+                                                        nil
+                                                        (point-charpos end))))
                     ((and (point<= view-point start)
                           (point< end view-end-point))
                      (draw-attribute-to-screen-region screen
@@ -192,7 +226,8 @@
 (defun draw-window-to-screen (window)
   (reset-screen-lines-and-left-lines window)
   (draw-window-overlays-to-screen window)
-  (draw-cursor-to-screen window))
+  (unless (window-cursor-invisible-p window)
+    (draw-cursor-to-screen window)))
 
 
 (defvar *printing-tab-size*)

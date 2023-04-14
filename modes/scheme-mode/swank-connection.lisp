@@ -64,8 +64,8 @@
               "")))
 
 (define-command scheme-connection-list () ()
-  (lem.menu-mode:display-menu
-   (make-instance 'lem.menu-mode:menu
+  (lem/multi-column-list:display
+   (make-instance 'lem/multi-column-list:multi-column-list
                   :columns '(" " "hostname" "port" "pid" "name" "version" "command")
                   :items *connection-list*
                   :column-function (lambda (c)
@@ -77,11 +77,7 @@
                                            (connection-implementation-version c)
                                            (connection-command c)))
                   :select-callback (lambda (menu c)
-                                     (change-current-connection c)
-                                     (lem.menu-mode:update-menu menu *connection-list*)
-                                     :close)
-                  :update-items-function (lambda () *connection-list*))
-   :name "Scheme Connections"))
+                                     (change-current-connection c)))))
 
 (defun check-connection ()
   (unless (connected-p)
@@ -293,7 +289,7 @@
              (scheme-eval `(swank:set-package ,package-name))
            (new-package name prompt-string)
            (when (repl-buffer)
-             (lem.listener-mode:refresh-prompt (repl-buffer)))))
+             (lem/listener-mode:refresh-prompt (repl-buffer)))))
         (t
          (check-scheme-mode)
          (setf (buffer-value (current-buffer) "package") package-name))))
@@ -466,7 +462,7 @@
             ((trivia:property :location location)
              (when (source-location-to-xref-location location nil t)
                (return t)))))
-    (lem.sourcelist:with-sourcelist (sourcelist "*scheme-compilations*")
+    (lem/peek-source:with-collecting-sources (collector)
       (dolist (note notes)
         (trivia:match note
           ((and (trivia:property :location location)
@@ -476,19 +472,17 @@
              (let* ((name (xref-filespec-to-filename (xref-location-filespec xref-location)))
                     (pos (xref-location-position xref-location))
                     (buffer (xref-filespec-to-buffer (xref-location-filespec xref-location))))
-               (lem.sourcelist:append-sourcelist
-                sourcelist
-                (lambda (cur-point)
-                  (insert-string cur-point name :attribute 'lem.sourcelist:title-attribute)
-                  (insert-string cur-point ":")
-                  (insert-string cur-point (princ-to-string pos)
-                                 :attribute 'lem.sourcelist:position-attribute)
-                  (insert-string cur-point ":")
-                  (insert-character cur-point #\newline 1)
-                  (insert-string cur-point message)
-                  (insert-character cur-point #\newline)
-                  (insert-string cur-point source-context))
-                (alexandria:curry #'go-to-location xref-location))
+               (lem/peek-source:with-appending-source
+                   (cur-point :move-function (alexandria:curry #'go-to-location xref-location))
+                 (insert-string cur-point name :attribute 'lem/peek-source:filename-attribute)
+                 (insert-string cur-point ":")
+                 (insert-string cur-point (princ-to-string pos)
+                                :attribute 'lem/peek-source:position-attribute)
+                 (insert-string cur-point ":")
+                 (insert-character cur-point #\newline 1)
+                 (insert-string cur-point message)
+                 (insert-character cur-point #\newline)
+                 (insert-string cur-point source-context))
                (push (make-highlight-overlay pos buffer)
                      *note-overlays*)))))))))
 
@@ -597,7 +591,7 @@
   (check-connection)
   (macroexpand-internal 'swank:swank-macroexpand-all))
 
-;; for r7rs-swank (fuzzy-completions is not supported) 
+;; for r7rs-swank (fuzzy-completions is not supported)
 ;(defvar *completion-symbol-with-fuzzy* t)
 (defvar *completion-symbol-with-fuzzy* nil)
 
@@ -833,7 +827,7 @@
      (unless *suppress-error-disp*
        (alexandria:destructuring-case value
          ((:abort string)
-          (funcall *write-string-function* 
+          (funcall *write-string-function*
                    (format nil "; Evaluation aborted: ~A~%" string)))))
 
      (finish-evaluated *connection* value id))
@@ -1124,15 +1118,14 @@
 
 (defun highlight-region (start end attribute name)
   (let ((overlay (make-overlay start end attribute)))
-    (start-timer 100
-                 nil
-                 (lambda ()
-                   (delete-overlay overlay))
-                 (lambda (err)
-                   (declare (ignore err))
-                   (ignore-errors
-                    (delete-overlay overlay)))
-                 name)))
+    (start-timer (make-timer (lambda ()
+                               (delete-overlay overlay))
+                             :handle-function (lambda (err)
+                                                (declare (ignore err))
+                                                (ignore-errors
+                                                  (delete-overlay overlay)))
+                             :name name)
+                 100)))
 
 (defun highlight-compilation-region (start end)
   (highlight-region start
@@ -1173,4 +1166,3 @@
               (sockint::shutdown fd sockint::SHUT_RDWR)
               (sockint::close fd)))))))
   (add-hook *exit-editor-hook* 'slime-quit-all-for-win32))
-

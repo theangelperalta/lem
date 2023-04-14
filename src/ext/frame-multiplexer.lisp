@@ -1,8 +1,8 @@
-(defpackage :lem-frame-multiplexer
-  (:use :cl :lem :lem.button)
+(defpackage :lem/frame-multiplexer
+  (:use :cl :lem :lem/button)
   #+sbcl
   (:lock t))
-(in-package :lem-frame-multiplexer)
+(in-package :lem/frame-multiplexer)
 
 (defconstant +max-number-of-frames+ 256)
 (defconstant +max-width-of-each-frame-name+ 20)
@@ -10,13 +10,13 @@
 (defvar *virtual-frame-map* (make-hash-table))
 
 (define-attribute frame-multiplexer-active-frame-name-attribute
-  (t :foreground "white" :background "blue"))
+  (t :foreground "white" :background "CornflowerBlue" :bold-p t))
 
 (define-attribute frame-multiplexer-frame-name-attribute
-  (t :foreground "white" :background "blue"))
+  (t :foreground "black" :background "dark gray" :bold-p t))
 
 (define-attribute frame-multiplexer-background-attribute
-  (t :underline-p t))
+  (t :foreground "white" :background "#303030"))
 
 (define-editor-variable frame-multiplexer nil ""
   (lambda (value)
@@ -43,10 +43,12 @@
                                      name)))))
 
 (defun tab-content (tab)
-  (format nil "~A~A:~A "
-          (if (tab-focus-p tab) #\# #\space)
-          (tab-number tab)
-          (tab-buffer-name tab)))
+  (values (format nil " ~A: ~A "
+                  (tab-number tab)
+                  (tab-buffer-name tab))
+          (if (tab-focus-p tab)
+              'frame-multiplexer-active-frame-name-attribute
+              'frame-multiplexer-frame-name-attribute)))
 
 (defun tab= (tab1 tab2)
   (and (equal (tab-focus-p tab1) (tab-focus-p tab2))
@@ -181,6 +183,14 @@
   (coerce (remove-if #'null (virtual-frame-id/frame-table virtual-frame))
           'list))
 
+(defun insert-tab-content (point tab action)
+  (insert-string point " " :attribute 'frame-multiplexer-background-attribute)
+  (multiple-value-bind (text attribute) (tab-content tab)
+    (insert-button point
+                   text
+                   action
+                   :attribute attribute)))
+
 (defun write-tabs-to-buffer (window frames tabs)
   (let* ((buffer (virtual-frame-header-buffer window))
          (p (buffer-point buffer))
@@ -189,16 +199,11 @@
     (loop :for frame :in frames
           :for tab :in tabs
           :do (let ((start-pos (point-charpos p)))
-                (insert-button p
-                               ;; virtual frame name on header
-                               (tab-content tab)
-                               ;; set action when click
-                               (let ((frame frame))
-                                 (lambda ()
-                                   (switch-current-frame window frame)))
-                               :attribute (if (tab-focus-p tab)
-                                              'frame-multiplexer-active-frame-name-attribute
-                                              'frame-multiplexer-frame-name-attribute))
+                (insert-tab-content p
+                                    tab
+                                    (let ((frame frame))
+                                      (lambda ()
+                                        (switch-current-frame window frame))))
                 (when (tab-focus-p tab)
                   ;; set buffer-point to that focused tab position
                   (let ((end-pos (point-charpos p)))

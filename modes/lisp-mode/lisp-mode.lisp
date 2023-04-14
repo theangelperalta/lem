@@ -53,6 +53,8 @@
 (define-key *lisp-mode-keymap* "C-c C-e" 'lisp-eval-last-expression)
 (define-key *lisp-mode-keymap* "C-M-x" 'lisp-eval-defun)
 (define-key *lisp-mode-keymap* "C-c C-r" 'lisp-eval-region)
+(define-key *lisp-mode-keymap* "C-c C-n" 'lisp-next-compilation-notes)
+(define-key *lisp-mode-keymap* "C-c C-p" 'lisp-previous-compilation-notes)
 (define-key *lisp-mode-keymap* "C-c C-l" 'lisp-load-file)
 (define-key *lisp-mode-keymap* "C-c M-c" 'lisp-remove-notes)
 (define-key *lisp-mode-keymap* "C-c C-k" 'lisp-compile-and-load-file)
@@ -75,44 +77,55 @@
                           (connection-pid *connection*)))
               "")))
 
-(defun change-current-connection (conn)
+(defun change-current-connection (connection)
   (when *connection*
     (abort-all *connection* "change connection")
     (notify-change-connection-to-wait-message-thread))
-  (setf *connection* conn))
+  (setf *connection* connection))
+
+(defmethod switch-connection ((connection connection))
+  (change-current-connection connection))
 
 (defun connected-p ()
   (not (null *connection*)))
 
-(defun add-connection (conn)
-  (push conn *connection-list*)
-  (change-current-connection conn))
+(defun add-connection (connection)
+  (push connection *connection-list*)
+  (change-current-connection connection))
 
-(defun remove-connection (conn)
-  (setf *connection-list* (delete conn *connection-list*))
-  ;(change-current-connection (car *connection-list*))
+(defun remove-connection (connection)
+  (setf *connection-list* (delete connection *connection-list*))
   (setf *connection* (car *connection-list*))
   *connection*)
 
+(defclass connection-item (lem/multi-column-list:multi-column-list-item)
+  ((connection :initarg :connection
+               :reader connection-item-connection)))
+
+(defclass connection-menu (lem/multi-column-list:multi-column-list) ()
+  (:default-initargs :columns '("" "hostname" "port" "pid" "name" "version" "command")))
+
+(defmethod lem/multi-column-list:map-columns ((component connection-menu) (item connection-item))
+  (let ((connection (connection-item-connection item)))
+    (list (if (eq connection *connection*) "*" "")
+          (connection-hostname connection)
+          (connection-port connection)
+          (or (self-connection-p connection) (connection-pid connection))
+          (connection-implementation-name connection)
+          (connection-implementation-version connection)
+          (connection-command connection))))
+
+(defmethod lem/multi-column-list:select-item ((component connection-menu) item)
+  (switch-connection (connection-item-connection item))
+  (lem/multi-column-list:update component)
+  (lem/multi-column-list:quit component))
+
 (define-command lisp-connection-list () ()
-  (lem.menu-mode:display-menu
-   (make-instance 'lem.menu-mode:menu
-                  :columns '(" " "hostname" "port" "pid" "name" "version" "command")
-                  :items *connection-list*
-                  :column-function (lambda (c)
-                                     (list (if (eq c *connection*) "*" "")
-                                           (connection-hostname c)
-                                           (connection-port c)
-                                           (or (self-connection-p c) (connection-pid c))
-                                           (connection-implementation-name c)
-                                           (connection-implementation-version c)
-                                           (connection-command c)))
-                  :select-callback (lambda (menu c)
-                                     (change-current-connection c)
-                                     (lem.menu-mode:update-menu menu *connection-list*)
-                                     :close)
-                  :update-items-function (lambda () *connection-list*))
-   :name "Lisp Connections"))
+  (lem/multi-column-list:display
+   (make-instance 'connection-menu
+                  :items (mapcar (lambda (c)
+                                   (make-instance 'connection-item :connection c))
+                                 *connection-list*))))
 
 (defvar *self-connected-port* nil)
 
@@ -131,7 +144,7 @@
       (log:debug "Starting internal SWANK and connecting to it" swank:*communication-style*)
       (let ((swank::*swank-debug-p* nil))
         (swank:create-server :port port :style :spawn))
-      (%slime-connect *localhost* port)
+      (connect-to-swank *localhost* port)
       (update-buffer-package)
       (setf *self-connected-port* port))))
 
@@ -142,6 +155,9 @@
        (ignore-errors (equal (connection-pid c) (swank/backend:getpid)))
        (= (connection-port c) (self-connected-port))
        :self))
+
+(defun self-connection ()
+  (find-if #'self-connection-p *connection-list*))
 
 (defun check-connection ()
   (unless (connected-p)
@@ -236,7 +252,7 @@
               :thread (current-swank-thread)
               :package package)))
 
-(defun eval-with-transcript (form &optional (package (current-package)))
+(defun eval-with-transcript (form &key (package (current-package)))
   (lisp-rex form
             :continuation (lambda (value)
                             (alexandria:destructuring-ecase value
@@ -249,8 +265,8 @@
 (defun re-eval-defvar (string)
   (eval-with-transcript `(swank:re-evaluate-defvar ,string)))
 
-(defun interactive-eval (string &optional (package (current-package)))
-  (eval-with-transcript `(swank:interactive-eval ,string) package))
+(defun interactive-eval (string &key (package (current-package)))
+  (eval-with-transcript `(swank:interactive-eval ,string) :package package))
 
 (defun eval-print (string &optional print-right-margin)
   (let ((value (lisp-eval (if print-right-margin
@@ -316,7 +332,7 @@
          (destructuring-bind (name prompt-string)
              (lisp-eval `(swank:set-package ,package-name))
            (new-package name prompt-string)
-           (lem.listener-mode:refresh-prompt (repl-buffer))))
+           (lem/listener-mode:refresh-prompt (repl-buffer))))
         (t
          (setf (buffer-package (current-buffer)) package-name))))
 
@@ -445,7 +461,7 @@
                   (cl:find-symbol (cl:string :load) :roswell))
              (uiop:symbol-call :roswell :load ,filename)
              (swank:load-file ,filename)))
-       "CL-USER"))))
+       :package "CL-USER"))))
 
 (defun get-operator-name ()
   (with-point ((point (current-point)))
@@ -479,8 +495,15 @@
                              successp
                              (and fastfile successp)))
     (highlight-notes notes)
-    (when (and loadp fastfile successp)
-      (lisp-eval-async `(swank:load-file ,(convert-local-to-remote-file fastfile))))))
+    (cond ((and loadp fastfile successp)
+           (lisp-eval-async `(swank:load-file ,(convert-local-to-remote-file fastfile))
+                            (lambda (result)
+                              (declare (ignore result))
+                              (uiop:delete-file-if-exists
+                               (convert-remote-to-local-file fastfile)))))
+          (fastfile
+           (uiop:delete-file-if-exists
+            (convert-remote-to-local-file fastfile))))))
 
 (defun show-compile-result (notes secs successp)
   (display-message (format nil "~{~A~^ ~}"
@@ -493,16 +516,36 @@
                                             (when secs
                                               (format nil "[~,2f secs]" secs)))))))
 
-(defun make-highlight-overlay (pos buffer)
+(defun make-highlight-overlay (pos buffer message source-context)
   (with-point ((point (buffer-point buffer)))
     (move-to-position point pos)
     (skip-chars-backward point #'syntax-symbol-char-p)
-    (make-overlay point
-                  (or (form-offset (copy-point point :temporary) 1)
-                      (buffer-end-point buffer))
-                  'compiler-note-attribute)))
+    (let ((overlay (make-overlay point
+                                 (or (form-offset (copy-point point :temporary) 1)
+                                     (buffer-end-point buffer))
+                                 'compiler-note-attribute)))
+      (overlay-put overlay 'message
+                   (with-output-to-string (out)
+                     (write-string message out)
+                     (when source-context
+                       (terpri out)
+                       (write-string source-context out))))
+      overlay)))
 
 (defvar *note-overlays* nil)
+
+(defun buffer-compilation-notes-overlays (buffer)
+  (buffer-value buffer 'compilation-notes-overlays))
+
+(defun (setf buffer-compilation-notes-overlays) (overlays buffer)
+  (setf (buffer-value buffer 'compilation-notes-overlays)
+        (sort overlays #'point< :key #'overlay-start)))
+
+(defun buffer-compilation-notes-timer (buffer)
+  (buffer-value buffer 'compilation-notes-timer))
+
+(defun (setf buffer-compilation-notes-timer) (value buffer)
+  (setf (buffer-value buffer 'compilation-notes-timer) value))
 
 (defun convert-notes (notes)
   (loop :for note :in notes
@@ -520,40 +563,67 @@
     (when buffer
       (kill-buffer buffer))))
 
+(defun show-compilation-notes ()
+  (dolist (overlay (buffer-compilation-notes-overlays (current-buffer)))
+    (when (point<= (overlay-start overlay) (current-point) (overlay-end overlay))
+      (display-message "~A" (overlay-get overlay 'message))
+      (return))))
+
+(defun move-to-next-compilation-notes (point)
+  (alexandria:when-let ((overlay (loop :for overlay :in (buffer-compilation-notes-overlays (point-buffer point))
+                                       :when (point< point (overlay-start overlay))
+                                       :return overlay)))
+    (move-point point (overlay-start overlay))))
+
+(defun move-to-previous-compilation-notes (point)
+  (alexandria:when-let ((overlay (loop :for last-overlay := nil :then overlay
+                                       :for overlay :in (buffer-compilation-notes-overlays (point-buffer point))
+                                       :when (point<= point (overlay-start overlay))
+                                       :return last-overlay
+                                       :finally (return last-overlay))))
+    (move-point point (overlay-start overlay))))
+
+(defun remove-compilation-notes-overlay-in-the-changed-point (point arg)
+  (declare (ignore arg))
+  (dolist (overlay (buffer-compilation-notes-overlays (point-buffer point)))
+    (when (point<= (overlay-start overlay) point (overlay-end overlay))
+      (delete-overlay overlay)
+      (alexandria:deletef (buffer-compilation-notes-overlays (point-buffer point)) overlay))))
+
 (defun highlight-notes (notes)
   (lisp-remove-notes)
-  (if (null notes)
-      (delete-compilations-buffer)
-      (lem.sourcelist:with-sourcelist (sourcelist "*lisp-compilations*")
-        (loop :for (xref-location message source-context) :in (convert-notes notes)
-              :do (let* ((name (xref-filespec-to-filename (xref-location-filespec xref-location)))
-                         (pos (xref-location-position xref-location))
-                         (buffer (xref-filespec-to-buffer (xref-location-filespec xref-location))))
-                    (lem.sourcelist:append-sourcelist
-                     sourcelist
-                     (lambda (cur-point)
-                       (insert-string cur-point name :attribute 'lem.sourcelist:title-attribute)
-                       (insert-string cur-point ":")
-                       (insert-string cur-point (princ-to-string pos)
-                                      :attribute 'lem.sourcelist:position-attribute)
-                       (insert-string cur-point ":")
-                       (insert-character cur-point #\newline 1)
-                       (insert-string cur-point message)
-                       (insert-character cur-point #\newline)
-                       (insert-string cur-point source-context))
-                     (alexandria:curry #'go-to-location xref-location))
-                    (push (make-highlight-overlay pos buffer)
-                          *note-overlays*))))))
+
+  (loop :for (xref-location message source-context) :in (convert-notes notes)
+        :do (let* ((pos (xref-location-position xref-location))
+                   (buffer (xref-filespec-to-buffer (xref-location-filespec xref-location))))
+              (push (make-highlight-overlay pos buffer message source-context)
+                    (buffer-compilation-notes-overlays (current-buffer)))))
+
+  (setf (buffer-compilation-notes-timer (current-buffer))
+        (start-timer (make-idle-timer 'show-compilation-notes :name "lisp-show-compilation-notes")
+                     200
+                     t))
+
+  (add-hook (variable-value 'before-change-functions :buffer (current-buffer))
+            'remove-compilation-notes-overlay-in-the-changed-point))
 
 (define-command lisp-remove-notes () ()
-  (mapc #'delete-overlay *note-overlays*)
-  (setf *note-overlays* '()))
+  (alexandria:when-let (timer (buffer-compilation-notes-timer (current-buffer)))
+    (stop-timer timer))
+  (dolist (overlay (buffer-compilation-notes-overlays (current-buffer)))
+    (delete-overlay overlay))
+  (setf (buffer-compilation-notes-overlays (current-buffer)) '()))
+
+(define-command lisp-next-compilation-notes () ()
+  (move-to-next-compilation-notes (current-point)))
+
+(define-command lisp-previous-compilation-notes () ()
+  (move-to-previous-compilation-notes (current-point)))
 
 (define-command lisp-compile-and-load-file () ()
   (check-connection)
   (when (buffer-modified-p (current-buffer))
-    (when (prompt-for-y-or-n-p "Save file")
-      (save-current-buffer)))
+    (save-current-buffer))
   (let ((file (buffer-filename (current-buffer))))
     (run-hooks (variable-value 'load-file-functions) file)
     (lisp-eval-async `(swank:compile-file-for-emacs ,(convert-local-to-remote-file file) t)
@@ -742,7 +812,14 @@
                                           ((:ok value)
                                            (destructuring-bind (completions timeout) value
                                              (declare (ignore timeout))
-                                             (funcall then (make-completion-items completions))))
+                                             (with-point ((start (current-point))
+                                                          (end (current-point)))
+                                               (skip-symbol-backward start)
+                                               (skip-symbol-forward end)
+                                               (funcall then
+                                                        (make-completion-items completions
+                                                                               start
+                                                                               end)))))
                                           ((:abort condition)
                                            (editor-error "abort ~A" condition))))
                         :thread (current-swank-thread)
@@ -814,7 +891,7 @@
    :timeout 1
    :style '(:gravity :center)))
 
-(defun %slime-connect (hostname port)
+(defun connect-to-swank (hostname port)
   (let ((connection
           (handler-case (if (eq hostname *localhost*)
                             (or (ignore-errors (new-connection "127.0.0.1" port))
@@ -832,7 +909,7 @@
             (parse-integer
              (prompt-for-string "Port: "
                                 :initial-value (princ-to-string *default-port*))))))
-  (let ((connection (%slime-connect hostname port)))
+  (let ((connection (connect-to-swank hostname port)))
     (when start-repl (start-lisp-repl))
     (connected-slime-message connection)))
 
@@ -1120,7 +1197,7 @@
             (retry-count 0))
         (labels ((interval ()
                    (handler-case
-                       (let ((conn (%slime-connect *localhost* port)))
+                       (let ((conn (connect-to-swank *localhost* port)))
                          (setf (connection-command conn) command)
                          (setf (connection-process conn) process)
                          (setf (connection-process-directory conn) directory)
@@ -1151,7 +1228,7 @@
                  (finalize ()
                    (stop-timer timer)
                    (stop-loading-spinner spinner)))
-          (setf timer (start-timer 500 t #'interval)))))))
+          (setf timer (start-timer (make-timer #'interval) 500 t)))))))
 
 (define-command slime (&optional ask-impl) ("P")
   (let ((command (if ask-impl (prompt-for-impl))))
@@ -1234,15 +1311,14 @@
 
 (defun highlight-region (start end attribute name)
   (let ((overlay (make-overlay start end attribute)))
-    (start-timer 100
-                 nil
-                 (lambda ()
-                   (delete-overlay overlay))
-                 (lambda (err)
-                   (declare (ignore err))
-                   (ignore-errors
-                    (delete-overlay overlay)))
-                 name)))
+    (start-timer (make-timer (lambda ()
+                               (delete-overlay overlay))
+                             :name name
+                             :handle-function (lambda (err)
+                                                (declare (ignore err))
+                                                (ignore-errors
+                                                  (delete-overlay overlay))))
+                 100)))
 
 (defun highlight-compilation-region (start end)
   (highlight-region start

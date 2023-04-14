@@ -1,5 +1,5 @@
-(defpackage :lem.language-mode
-  (:use :cl :lem :lem.sourcelist)
+(defpackage :lem/language-mode
+  (:use :cl :lem)
   (:export
    :*language-mode-keymap*
    :language-mode
@@ -11,6 +11,7 @@
    :find-definitions-function
    :find-references-function
    :language-mode-tag
+   :buffer-language-mode
    :completion-spec
    :indent-size
    :root-uri-patterns
@@ -33,10 +34,11 @@
    :move-to-xref-location-position
    :display-xref-locations
    :display-xref-references
-   :find-root-directory)
+   :find-root-directory
+   :buffer-root-directory)
   #+sbcl
   (:lock t))
-(in-package :lem.language-mode)
+(in-package :lem/language-mode)
 
 (define-editor-variable idle-function nil)
 (define-editor-variable beginning-of-defun-function nil)
@@ -63,14 +65,15 @@
     (:name "language"
      :keymap *language-mode-keymap*)
   (when (or (null *idle-timer*)
-            (not (timer-alive-p *idle-timer*)))
+            (timer-expired-p *idle-timer*))
     (setf *idle-timer*
-          (start-idle-timer 200 t 'language-idle-function
-                            (lambda (condition)
-                              (stop-timer *idle-timer*)
-                              (pop-up-backtrace condition)
-                              (setf *idle-timer* nil))
-                            "language-idle-function"))))
+          (start-timer (make-idle-timer 'language-idle-function
+                                        :handle-function (lambda (condition)
+                                                           (stop-timer *idle-timer*)
+                                                           (pop-up-backtrace condition)
+                                                           (setf *idle-timer* nil))
+                                        :name "language-idle-function")
+                       200 t))))
 
 (define-key *language-mode-keymap* "C-M-a" 'beginning-of-defun)
 (define-key *language-mode-keymap* "C-M-e" 'end-of-defun)
@@ -268,14 +271,14 @@
   (type nil :read-only t)
   (locations nil :read-only t))
 
-(defun xref-filespec-to-buffer (filespec)
+(defun xref-filespec-to-buffer (filespec &key temporary)
   (cond ((bufferp filespec)
          filespec)
         (t
          (assert (or (stringp filespec) (pathnamep filespec)))
          (when (probe-file filespec)
            (or (get-file-buffer (file-namestring filespec))
-               (find-file-buffer filespec))))))
+               (find-file-buffer filespec :temporary temporary))))))
 
 (defun xref-filespec-to-filename (filespec)
   (etypecase filespec
@@ -296,13 +299,21 @@
        (move-to-line point line-number)
        (line-offset point 0 charpos)))))
 
-(defun go-to-location (location set-buffer-fn)
-  (let ((buffer (xref-filespec-to-buffer (xref-location-filespec location))))
-    (unless buffer (editor-error "~A does not exist." (xref-location-filespec location)))
-    (funcall set-buffer-fn buffer)
-    (let ((position (xref-location-position location))
-          (point (buffer-point buffer)))
-      (move-to-xref-location-position point position))))
+(defun location-to-point (location &key temporary)
+  (alexandria:when-let ((buffer (xref-filespec-to-buffer (xref-location-filespec location)
+                                                         :temporary temporary)))
+    (with-point ((point (buffer-point buffer)))
+      (move-to-xref-location-position point (xref-location-position location))
+      point)))
+
+(defun go-to-location (location &optional set-buffer-fn)
+  (let ((point (location-to-point location :temporary nil)))
+    (unless point
+      (editor-error "~A does not exist." (xref-location-filespec location)))
+    (let ((buffer (point-buffer point)))
+      (when set-buffer-fn
+        (funcall set-buffer-fn buffer))
+      (move-point (buffer-point buffer) point))))
 
 (defgeneric location-position< (position1 position2)
   (:method ((position1 integer) (position2 integer))
@@ -330,57 +341,73 @@
                             (location-position< (xref-location-position location1)
                                                 (xref-location-position location2))))))))
 
+(defun same-locations-p (locations)
+  (apply #'=
+         (loop :for location :in locations
+               :for point := (location-to-point location :temporary t)
+               :when point
+               :collect (line-number-at-point point))))
+
 (defun display-xref-locations (locations)
   (unless locations
     (editor-error "No definitions found"))
   (push-location-stack (current-point))
   (setf locations (uiop:ensure-list locations))
-  (if (null (rest locations))
-      (progn
-        (go-to-location (first locations) #'switch-to-buffer)
-        (jump-highlighting))
-      (let ((prev-file nil))
-        (with-sourcelist (sourcelist "*definitions*")
-          (dolist (location (sort-xref-locations locations))
-            (let ((file (xref-filespec-to-filename (xref-location-filespec location)))
-                  (content (xref-location-content location)))
-              (append-sourcelist sourcelist
-                                 (lambda (p)
-                                   (unless (equal prev-file file)
-                                     (xref-insert-headline file p 0))
-                                   (xref-insert-content content p 1))
-                                 (let ((location location))
-                                   (alexandria:curry #'go-to-location location)))
-              (setf prev-file file)))))))
+  (cond ((same-locations-p locations)
+         (go-to-location (first locations) #'switch-to-buffer)
+         (lem/peek-source:highlight-matched-line (current-point)))
+        (t
+         (let ((prev-file nil))
+           (lem/peek-source:with-collecting-sources (collector)
+             (dolist (location (sort-xref-locations locations))
+               (let ((file (xref-filespec-to-filename (xref-location-filespec location)))
+                     (content (xref-location-content location)))
+                 (unless (equal prev-file file)
+                   (lem/peek-source:with-insert (point)
+                     (xref-insert-headline file point 0)))
+                 (lem/peek-source:with-appending-source
+                     (point :move-function (let ((location location))
+                                             (lambda ()
+                                               (go-to-location location))))
+                   (xref-insert-content content point 1))
+                 (setf prev-file file))))))))
 
 (define-command find-definitions () ()
   (alexandria:when-let (fn (variable-value 'find-definitions-function :buffer))
     (funcall fn (current-point))))
 
+(defun xref-references-length=1 (xref-references-list)
+  (and (alexandria:length= 1 xref-references-list)
+       (alexandria:length= 1 (xref-references-locations (first xref-references-list)))))
+
 (defun display-xref-references (refs)
   (unless refs
     (editor-error "No references found"))
   (push-location-stack (current-point))
-  (with-sourcelist (sourcelist "*references*")
-    (dolist (ref (uiop:ensure-list refs))
-      (let ((type (xref-references-type ref)))
-        (when type
-          (append-sourcelist sourcelist
-                             (lambda (p)
-                               (xref-insert-headline type p 0))
-                             nil))
-        (let ((prev-file nil))
-          (dolist (location (sort-xref-locations (xref-references-locations ref)))
-            (let ((file (xref-filespec-to-filename (xref-location-filespec location)))
-                  (content (xref-location-content location)))
-              (append-sourcelist sourcelist
-                                 (lambda (p)
-                                   (unless (equal prev-file file)
-                                     (xref-insert-headline file p 1))
-                                   (xref-insert-content content p 2))
-                                 (let ((location location))
-                                   (alexandria:curry #'go-to-location location)))
-              (setf prev-file file))))))))
+  (let ((refs (uiop:ensure-list refs)))
+    (cond ((xref-references-length=1 refs)
+           (go-to-location (first (xref-references-locations (first refs)))
+                           #'switch-to-buffer)
+           (lem/peek-source:highlight-matched-line (current-point)))
+          (t
+           (lem/peek-source:with-collecting-sources (collector)
+             (dolist (ref refs)
+               (let ((type (xref-references-type ref)))
+                 (when type
+                   (lem/peek-source:with-insert (point)
+                     (xref-insert-headline type point 0)))
+                 (let ((prev-file nil))
+                   (dolist (location (sort-xref-locations (xref-references-locations ref)))
+                     (let ((file (xref-filespec-to-filename (xref-location-filespec location)))
+                           (content (xref-location-content location)))
+                       (unless (equal prev-file file)
+                         (lem/peek-source:with-insert (point)
+                           (xref-insert-headline file point 1)))
+                       (lem/peek-source:with-appending-source
+                           (point :move-function (let ((location location))
+                                                   (alexandria:curry #'go-to-location location)))
+                         (xref-insert-content content point 2))
+                       (setf prev-file file)))))))))))
 
 (define-command find-references () ()
   (alexandria:when-let (fn (variable-value 'find-references-function :buffer))
@@ -389,14 +416,14 @@
 (defvar *xref-stack-table* (make-hash-table :test 'equal))
 (defvar *xref-history-table* (make-hash-table :test 'equal))
 
-(defun language-mode-tag (buffer)
+(defun buffer-language-mode (buffer)
   (or (variable-value 'language-mode-tag :buffer buffer)
       (buffer-major-mode buffer)))
 
 (defun push-location-stack (point)
   (run-hooks *set-location-hook* point)
   (let* ((buffer (point-buffer point))
-         (key (language-mode-tag buffer))
+         (key (buffer-language-mode buffer))
          (elt (list (buffer-name buffer)
                     (line-number-at-point point)
                     (point-charpos point))))
@@ -406,7 +433,7 @@
     (push elt (gethash key *xref-stack-table*))))
 
 (define-command pop-definition-stack () ()
-  (let ((elt (pop (gethash (language-mode-tag (current-buffer))
+  (let ((elt (pop (gethash (buffer-language-mode (current-buffer))
                            *xref-stack-table*))))
     (when elt
       (destructuring-bind (buffer-name line-number charpos) elt
@@ -417,11 +444,11 @@
         (select-buffer buffer-name)
         (move-to-line (current-point) line-number)
         (line-offset (current-point) 0 charpos)
-        (jump-highlighting)))))
+        (lem/peek-source:highlight-matched-line (current-point))))))
 
 (define-command complete-symbol () ()
   (alexandria:when-let (completion (variable-value 'completion-spec :buffer))
-    (lem.completion-mode:run-completion completion)))
+    (lem/completion-mode:run-completion completion)))
 
 (define-command indent-line-and-complete-symbol () ()
   (if (variable-value 'calc-indent-function :buffer)
@@ -490,15 +517,8 @@
                    (t (recursive (uiop:pathname-parent-directory-pathname directory))))))
     (recursive directory)))
 
-(defun find-root-directory (buffer)
-  (or (find-root-directory-1 (buffer-directory buffer)
-                             (or (variable-value 'root-uri-patterns :buffer buffer)
+(defun find-root-directory (directory root-uri-patterns)
+  (or (find-root-directory-1 directory
+                             (or root-uri-patterns
                                  (list (lambda (name) (string= name ".git")))))
-      (buffer-directory buffer)))
-
-(define-command project-grep () ()
-  (let* ((directory (find-root-directory (current-buffer)))
-         (symbol-string (or (symbol-string-at-point (current-point)) ""))
-         (query (prompt-for-string (format nil "(Directory: ~A) " directory)
-                                   :initial-value (format nil "git grep -nH ~A" symbol-string))))
-    (lem.grep:grep query directory)))
+      directory))

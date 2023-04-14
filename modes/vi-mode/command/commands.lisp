@@ -1,13 +1,13 @@
-(defpackage :lem-vi-mode.commands
+(defpackage :lem-vi-mode/commands
   (:use :cl
         :lem
-        :lem.universal-argument
-        :lem.show-paren
-        :lem-vi-mode.core
-        :lem-vi-mode.word
-        :lem-vi-mode.state.visual
-        :lem-vi-mode.state.insert
-        :lem-vi-mode.jump-motions)
+        :lem/universal-argument
+        :lem/show-paren
+        :lem-vi-mode/core
+        :lem-vi-mode/word
+        :lem-vi-mode/state/visual
+        :lem-vi-mode/state/insert
+        :lem-vi-mode/jump-motions)
   (:export :vi-move-to-beginning-of-line/universal-argument-0
            :vi-forward-char
            :vi-backward-char
@@ -73,7 +73,7 @@
            :vi-jump-next
            :vi-normal
            :vi-keyboard-quit))
-(in-package :lem-vi-mode.commands)
+(in-package :lem-vi-mode/commands)
 
 (defvar *cursor-offset* -1)
 (defvar *vi-clear-recursive* nil)
@@ -553,7 +553,7 @@
 
 (defun vi-backward-matching-paren (p)
   (when (syntax-closed-paren-char-p (character-at p))
-    (scan-lists (character-offset (copy-point p :temporary) 1) -1 0)))
+    (scan-lists (character-offset (copy-point p :temporary) 1) -1 0 t)))
 
 (define-command vi-move-to-matching-paren () ()
   (alexandria:when-let ((p (or (vi-backward-matching-paren (current-point))
@@ -577,25 +577,25 @@
 
 (define-command vi-search-forward () ()
   (with-jump-motion
-    (lem.isearch:isearch-forward-regexp "/")))
+    (lem/isearch:isearch-forward-regexp "/")))
 
 (define-command vi-search-backward () ()
   (with-jump-motion
-    (lem.isearch:isearch-backward-regexp "?")))
+    (lem/isearch:isearch-backward-regexp "?")))
 
 (define-command vi-search-next (n) ("p")
   (with-jump-motion
-    (dotimes (i n) (lem.isearch:isearch-next))))
+    (dotimes (i n) (lem/isearch:isearch-next))))
 
 (define-command vi-search-previous (n) ("p")
   (with-jump-motion
-    (dotimes (i n) (lem.isearch:isearch-prev))))
+    (dotimes (i n) (lem/isearch:isearch-prev))))
 
 (define-command vi-search-forward-symbol-at-point () ()
   (with-jump-motion
-    (lem.isearch:isearch-forward-symbol-at-point)
-    (lem.isearch:isearch-finish)
-    (lem.isearch:isearch-next)))
+    (lem/isearch:isearch-forward-symbol-at-point)
+    (lem/isearch:isearch-finish)
+    (lem/isearch:isearch-next)))
 
 (define-command vi-goto-first-line () ()
   (with-jump-motion

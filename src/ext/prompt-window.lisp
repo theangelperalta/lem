@@ -1,13 +1,13 @@
-(defpackage :lem.prompt-window
+(defpackage :lem/prompt-window
   (:use :cl :lem)
   (:import-from :alexandria
                 :when-let)
   #+sbcl
   (:lock t))
-(in-package :lem.prompt-window)
+(in-package :lem/prompt-window)
 
 (defconstant +border-size+ 1)
-(defconstant +min-width+   3)
+(defconstant +min-width+   10)
 (defconstant +min-height+  1)
 
 (defvar *history-table* (make-hash-table))
@@ -123,7 +123,7 @@
 (define-command prompt-completion () ()
   (alexandria:when-let (completion-fn (prompt-window-completion-function (current-prompt-window)))
     (with-point ((start (current-prompt-start-point)))
-      (lem.completion-mode:run-completion
+      (lem/completion-mode:run-completion
        (lambda (point)
          (with-point ((start start)
                       (end point))
@@ -133,12 +133,15 @@
              (loop :for item :in items
                    :when (typecase item
                            (string
-                            (lem.completion-mode:make-completion-item :label item
+                            (lem/completion-mode:make-completion-item :label item
                                                                       :start start
                                                                       :end end))
-                           (lem.completion-mode:completion-item
+                           (lem/completion-mode:completion-item
                             item))
-                   :collect :it))))))))
+                   :collect :it))))
+       :style '(:gravity :horizontally-adjacent-window
+                :offset-y -1
+                :shape :drop-curtain)))))
 
 (define-command prompt-previous-history () ()
   (let ((history (prompt-window-history (current-prompt-window))))
@@ -151,14 +154,17 @@
     (or (replace-if-history-exists #'lem/common/history:next-history)
         (replace-if-history-exists #'lem/common/history:restore-edit-string))))
 
+(defun min-width ()
+  +min-width+)
+
 (defun compute-window-rectangle (buffer &key gravity source-window)
-  (destructuring-bind (width height) (lem.popup-window::compute-size-from-buffer buffer)
-    (lem.popup-window::compute-popup-window-rectangle
-     (lem.popup-window::ensure-gravity gravity)
+  (destructuring-bind (width height) (lem/popup-window::compute-buffer-size buffer)
+    (lem/popup-window::compute-popup-window-rectangle
+     (lem/popup-window::ensure-gravity gravity)
      :source-window source-window
      ;; Find File: <file-name>|
      ;;                       ^ ここにカーソルがあるとき、widthは1つ余分に幅が必要
-     :width (alexandria:clamp (1+ width) +min-width+ (- (display-width) 2))
+     :width (alexandria:clamp (1+ width) (min-width) (- (display-width) 2))
      :height (alexandria:clamp height +min-height+ (- (display-height) 2)))))
 
 (defun make-prompt-window (buffer parameters)
@@ -180,17 +186,26 @@
                    :gravity (prompt-gravity parameters)
                    :border (if (prompt-use-border-p parameters) +border-size+ 0))))
 
+(defun get-child-window-width ()
+  (let* ((context lem/completion-mode::*completion-context*)
+         (popup-menu (and context (lem/completion-mode::context-popup-menu context))))
+    (if popup-menu
+        (window-width (lem/popup-menu::popup-menu-window popup-menu))
+        0)))
+
 (defmethod update-prompt-window ((window floating-prompt))
-  (destructuring-bind (x y width height)
-      (compute-window-rectangle (window-buffer window)
-                                :gravity (prompt-gravity window)
-                                :source-window (prompt-window-caller-of-prompt-window window))
-    (unless (and (= x (window-x window))
-                 (= y (window-y window)))
-      (lem::window-set-pos window x y))
-    (unless (and (= width (window-width window))
-                 (= height (window-height window)))
-      (lem::window-set-size window width height))))
+  (let ((child-width (get-child-window-width)))
+    (destructuring-bind (x y width height)
+        (compute-window-rectangle (window-buffer window)
+                                  :gravity (prompt-gravity window)
+                                  :source-window (prompt-window-caller-of-prompt-window window))
+      (unless (and (= x (window-x window))
+                   (= y (window-y window)))
+        (lem::window-set-pos window x y))
+      (let ((width (max width child-width)))
+        (unless (and (= width (window-width window))
+                     (= height (window-height window)))
+          (lem::window-set-size window width height))))))
 
 (defun initialize-prompt-buffer (buffer)
   (let ((*inhibit-read-only* t)
@@ -368,7 +383,7 @@
               (let ((label (tail-of-pathname filename)))
                 (with-point ((s (current-prompt-start-point))
                              (e (current-prompt-start-point)))
-                  (lem.completion-mode:make-completion-item
+                  (lem/completion-mode:make-completion-item
                    :label label
                    :start (move-to-file-start s)
                    :end (line-end e)))))
@@ -378,7 +393,7 @@
   (loop :for buffer :in (completion-buffer string)
         :collect (with-point ((s (current-prompt-start-point))
                               (e (current-prompt-start-point)))
-                   (lem.completion-mode:make-completion-item
+                   (lem/completion-mode:make-completion-item
                     :detail (alexandria:if-let (filename (buffer-filename buffer))
                               (enough-namestring filename (probe-file "./"))
                               "")

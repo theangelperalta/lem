@@ -39,7 +39,7 @@ After that, please follow the steps bellow.
 
 ```
 1. install lem by roswell
-$ ros install follow-dependency=t lem-project/lem
+$ ros follow-dependency=t install lem-project/lem
 
 2. add the PATH in the initialization file(such as ~/.bashrc)
 export PATH=$PATH:~/.roswell/bin
@@ -65,7 +65,7 @@ You can watch the screencast on Youtube.
 
 Lem loads `~/.lem/init.lisp` when starting up.
 
-You can see an example [here](lemrc-example) or [here](https://github.com/Fedreg/.lem/blob/master/init.lisp)
+You can see an example [here](https://github.com/Fedreg/.lem/blob/master/init.lisp)
 
 fukamachi also published his init files on GitHub.
 https://github.com/fukamachi/.lem

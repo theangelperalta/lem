@@ -71,10 +71,8 @@
                  (redraw-display)))))
 
          (read-command-and-call ()
-           (let ((cmd (progn
-                        (start-idle-timers)
-                        (prog1 (read-command)
-                          (stop-idle-timers)))))
+           (let ((cmd (with-idle-timers ()
+                        (read-command))))
              (message nil)
              (call-command cmd nil)))
 
@@ -115,8 +113,14 @@
 (defun toplevel-command-loop-p ()
   *toplevel-command-loop-p*)
 
+(defvar *command-loop-counter* 0)
+
+(defun command-loop-counter ()
+  *command-loop-counter*)
+
 (defun command-loop ()
   (do-command-loop (:interactive t)
+    (incf *command-loop-counter*)
     (if (toplevel-command-loop-p)
         (handler-bind ((signal-handler #'handle-signal))
           (with-error-handler ()

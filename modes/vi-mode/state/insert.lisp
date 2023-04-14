@@ -1,10 +1,10 @@
-(defpackage :lem-vi-mode.state.insert
+(defpackage :lem-vi-mode/state/insert
   (:use :cl
         :lem
-        :lem-vi-mode.core)
+        :lem-vi-mode/core)
   (:export :*insert-keymap*
   	   :insert))
-(in-package :lem-vi-mode.state.insert)
+(in-package :lem-vi-mode/state/insert)
 
 (defvar *insert-keymap* (make-keymap :name '*insert-keymap* :parent *global-keymap*))
 

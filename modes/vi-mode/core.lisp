@@ -1,7 +1,7 @@
-(defpackage :lem-vi-mode.core
+(defpackage :lem-vi-mode/core
   (:use :cl
         :lem
-        :lem.universal-argument)
+        :lem/universal-argument)
   (:import-from :cl-package-locks)
   (:export :*enable-hook*
            :*disable-hook*
@@ -18,7 +18,7 @@
            :e-hook
            :d-hook
            :normal))
-(in-package :lem-vi-mode.core)
+(in-package :lem-vi-mode/core)
 
 (defvar *default-cursor-color* nil)
 
@@ -84,15 +84,14 @@
 
 (defmacro %define-vi-action (&whole form vi-action name-and-options params (&rest arg-descriptors) &body body)
   (destructuring-bind (name . options) (uiop:ensure-list name-and-options)
-    (let ((primary-class (lem::primary-class options))
-          (advice-classes (alexandria:assoc-value options :advice-classes))
+    (let ((advice-classes (alexandria:assoc-value options :advice-classes))
           (class-name (alexandria:if-let (elt (assoc :class options))
                         (second elt)
                         name))
           (command-name (alexandria:if-let (elt (assoc :name options))
                           (second elt)
                           (string-downcase name))))
-                          `(define-command (,class-name (:primary-class ,vi-action) (:advice-classes ,primary-class ,@advice-classes)) ,params ,arg-descriptors
+                          `(define-command (,class-name (:advice-classes vi-action ,@advice-classes)) ,params ,arg-descriptors
                            ,@body))))
 
 (defclass vi-action () ())

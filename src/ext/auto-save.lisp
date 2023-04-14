@@ -1,9 +1,9 @@
-(defpackage :lem.auto-save
+(defpackage :lem/auto-save
   (:use :cl :lem)
   (:export :*make-backup-files*)
   #+sbcl
   (:lock t))
-(in-package :lem.auto-save)
+(in-package :lem/auto-save)
 
 (define-editor-variable auto-save-checkpoint-frequency 5)
 (define-editor-variable auto-save-key-count-threshold 256)
@@ -47,10 +47,14 @@
   (unless *timer*
     (let ((interval (variable-value 'auto-save-checkpoint-frequency)))
       (when (and (numberp interval) (plusp interval))
-        (setf *timer* (start-idle-timer (* interval 1000) t 'checkpoint-all-buffers
-                                        (lambda (condition)
-                                          (pop-up-backtrace condition)
-                                          (disable)) "autosave"))))
+        (setf *timer*
+              (start-timer (make-idle-timer 'checkpoint-all-buffers
+                                            :handle-function (lambda (condition)
+                                                               (pop-up-backtrace condition)
+                                                               (disable))
+                                            :name "autosave")
+                           (* interval 1000)
+                           t))))
     (add-hook *input-hook* 'count-keys)))
 
 (defun disable ()

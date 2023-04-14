@@ -3,57 +3,27 @@
   (:use :cl
         :lem
         :alexandria
-        :lem-language-server/protocol/lsp-type
-        :lem-language-server/protocol/converter
-        :lem-language-server/protocol/yason-utils
-        :lem-language-server/protocol/utils)
+        :lem-lsp-base/type
+        :lem-lsp-base/converter
+        :lem-lsp-base/yason-utils
+        :lem-lsp-base/utils
+        :lem-lsp-mode/spec)
   (:shadow :execute-command)
-  (:import-from :lem-lsp-mode/utils)
-  (:import-from :lem-lsp-mode/request)
-  (:import-from :lem-lsp-mode/client)
-  (:import-from :lem-lsp-mode/context-menu)
-  (:local-nicknames (:utils :lem-lsp-mode/utils))
-  (:local-nicknames (:request :lem-lsp-mode/request))
+  (:import-from :lem-language-client/request)
+  (:import-from :lem/context-menu)
   (:local-nicknames (:client :lem-lsp-mode/client))
-  (:local-nicknames (:completion :lem.completion-mode))
-  (:local-nicknames (:context-menu :lem-lsp-mode/context-menu))
-  (:local-nicknames (:spinner :lem.loading-spinner))
-  (:export :spec-initialization-options
+  (:local-nicknames (:request :lem-language-client/request))
+  (:local-nicknames (:completion :lem/completion-mode))
+  (:local-nicknames (:context-menu :lem/context-menu))
+  (:local-nicknames (:spinner :lem/loading-spinner))
+  (:local-nicknames (:language-mode :lem/language-mode))
+  (:export :get-buffer-from-text-document-identifier
+           :spec-initialization-options
+           :register-lsp-method
            :define-language-spec))
 (in-package :lem-lsp-mode/lsp-mode)
 
 ;;;
-(defparameter *client-capabilities-text*
-  (load-time-value
-   (uiop:read-file-string
-    (asdf:system-relative-pathname :lem-lsp-mode
-                                   "client-capabilities.json"))))
-
-(defun client-capabilities ()
-  (convert-from-json
-   (parse-json *client-capabilities-text*)
-   'lsp:client-capabilities))
-
-;;;
-(defvar *language-id-server-info-map* (make-hash-table :test 'equal))
-
-(defstruct server-info
-  port
-  process
-  disposable)
-
-(defun server-process-buffer-name (spec)
-  (format nil "*Lsp <~A>*" (spec-language-id spec)))
-
-(defun make-server-process-buffer (spec)
-  (make-buffer (server-process-buffer-name spec)))
-
-(defun get-spec-command (spec &rest args)
-  (let ((command (spec-command spec)))
-    (if (functionp command)
-        (apply command args)
-        command)))
-
 (define-condition not-found-program (editor-error)
   ((name :initarg :name
          :initform (required-argument :name)
@@ -75,69 +45,34 @@
     (when (spec-readme-url spec)
       (format out "~&~%See follow for the readme URL~2% ~A ~%" (spec-readme-url spec)))))
 
-(defun exist-program-p (program)
-  (let ((status
-          (nth-value 2
-                     (uiop:run-program (list "which" program)
-                                       :ignore-error-status t))))
-    (= status 0)))
-
 (defun check-exist-program (program spec)
   (unless (exist-program-p program)
     (error 'not-found-program :name program :spec spec)))
 
+;;;
+(defun server-process-buffer-name (spec)
+  (format nil "*Lsp <~A>*" (spec-language-id spec)))
+
 (defmethod run-server-using-mode ((mode (eql :tcp)) spec)
   (flet ((output-callback (string)
-           (let* ((buffer (make-server-process-buffer spec))
+           (let* ((buffer (make-buffer (server-process-buffer-name spec)))
                   (point (buffer-point buffer)))
              (buffer-end point)
              (insert-string point string))))
     (let* ((port (or (spec-port spec) (lem-socket-utils:random-available-port)))
            (process (when-let (command (get-spec-command spec port))
                       (check-exist-program (first command) spec)
-                      (lem-process:run-process command
-                                               :output-callback #'output-callback))))
-      (make-server-info :process process
-                        :port port
-                        :disposable (lambda ()
-                                      (when process
-                                        (lem-process:delete-process process)))))))
+                      (lem-process:run-process command :output-callback #'output-callback))))
+      (make-instance 'client:tcp-client :process process :port port))))
 
 (defmethod run-server-using-mode ((mode (eql :stdio)) spec)
   (let ((command (get-spec-command spec)))
     (check-exist-program (first command) spec)
     (let ((process (async-process:create-process command :nonblock nil)))
-      (make-server-info :process process
-                        :disposable (lambda () (async-process:delete-process process))))))
+      (make-instance 'client:stdio-client :process process))))
 
-(defun run-server (spec)
-  (run-server-using-mode (spec-mode spec) spec))
-
-(defun get-running-server-info (spec)
-  (gethash (spec-language-id spec) *language-id-server-info-map*))
-
-(defun remove-server-info (spec)
-  (remhash (spec-language-id spec) *language-id-server-info-map*))
-
-(defun ensure-running-server-process (spec)
-  (unless (get-running-server-info spec)
-    (setf (gethash (spec-language-id spec) *language-id-server-info-map*)
-          (run-server spec))
-    t))
-
-(defun kill-server-process (spec)
-  (when-let* ((server-info (get-running-server-info spec))
-              (disposable (server-info-disposable server-info)))
-    (funcall disposable)
-    (remove-server-info spec)))
-
-(defun quit-all-server-process ()
-  (maphash (lambda (language-id server-info)
-             (declare (ignore language-id))
-             (when-let ((disposable (server-info-disposable server-info)))
-               (funcall disposable)))
-           *language-id-server-info-map*)
-  (clrhash *language-id-server-info-map*))
+(defmethod run-server (spec)
+  (run-server-using-mode (spec-connection-mode spec) spec))
 
 ;;;
 (defmacro with-jsonrpc-error (() &body body)
@@ -158,122 +93,144 @@
                          (lambda (message code)
                            (send-event (lambda () (jsonrpc-editor-error message code))))))
 
-(defun display-message (text &key (gravity :cursor) source-window)
+(defun display-message (text &key style source-window)
   (when text
     (show-message text
-                  :style `(:gravity ,gravity
-                           :use-border t
-                           :background-color "#404040")
+                  :style style
                   :timeout nil
                   :source-window source-window)))
 
-;;;
-(defun buffer-language-mode (buffer)
-  (or (lem.language-mode:language-mode-tag buffer)
-      (buffer-major-mode buffer)))
+(defun make-temporary-unwrap-buffer ()
+  (let ((buffer (make-buffer nil :temporary t :enable-undo-p nil)))
+    (setf (variable-value 'lem:line-wrap :buffer buffer) nil)
+    buffer))
 
 ;;;
-(defgeneric spec-initialization-options (spec)
-  (:method (spec) nil))
-
-(defclass spec ()
-  ((language-id
-    :initarg :language-id
-    :initform (required-argument :language-id)
-    :reader spec-language-id)
-   (root-uri-patterns
-    :initarg :root-uri-patterns
-    :initform nil
-    :reader spec-root-uri-patterns)
-   (command
-    :initarg :command
-    :initform nil
-    :reader spec-command)
-   (install-command
-    :initarg :install-command
-    :initform nil
-    :reader spec-install-command)
-   (readme-url
-    :initarg :readme-url
-    :initform nil
-    :reader spec-readme-url)
-   (mode
-    :initarg :mode
-    :initform (required-argument :mode)
-    :reader spec-mode)
-   (port
-    :initarg :port
-    :initform nil
-    :reader spec-port)))
-
-(defun get-language-spec (major-mode)
-  (make-instance (get major-mode 'spec)))
-
-(defun register-language-spec (major-mode spec-name)
-  (setf (get major-mode 'spec) spec-name))
-
-;;;
-(defvar *workspaces* '())
-
-(defstruct workspace
-  root-uri
-  client
-  spec
-  server-capabilities
-  server-info
-  (trigger-characters (make-hash-table)))
-
-(defun workspace-language-id (workspace)
-  (spec-language-id (workspace-spec workspace)))
-
-(defun find-workspace (language-id &key (errorp t))
-  (dolist (workspace *workspaces*
-                     (when errorp
-                       (editor-error "The ~A workspace is not found." language-id)))
-    (when (equal (workspace-language-id workspace)
-                 language-id)
-      (return workspace))))
-
-(defun buffer-workspace (buffer)
-  (buffer-value buffer 'workspace))
-
-(defun (setf buffer-workspace) (workspace buffer)
-  (setf (buffer-value buffer 'workspace) workspace))
-
 (defun buffer-language-spec (buffer)
-  (get-language-spec (buffer-language-mode buffer)))
+  (get-language-spec (language-mode:buffer-language-mode buffer)))
 
 (defun buffer-language-id (buffer)
-  (let ((spec (buffer-language-spec buffer)))
-    (when spec
-      (spec-language-id spec))))
+  (when-let (spec (buffer-language-spec buffer))
+    (spec-language-id spec)))
 
 (defun buffer-version (buffer)
   (buffer-modified-tick buffer))
-
-(defun random-string (length)
-  (with-output-to-string (out)
-              (loop :repeat length
-                    :do (loop :for code := (random 128)
-                              :for char := (code-char code)
-                              :until (alphanumericp char)
-                              :finally (write-char char out)))))
-
-(defun temporary-buffer-uri (buffer)
-  (or (buffer-value buffer 'uri)
-      (setf (buffer-value buffer 'uri)
-            (format nil "/tmp/~A" (random-string 32)))))
 
 (defun buffer-uri (buffer)
   ;; TODO: lem-language-server::buffer-uri
   (if (buffer-filename buffer)
       (pathname-to-uri (buffer-filename buffer))
-      ;; ファイルに関連付けられていないバッファ(*tmp*やRPEL)は一時ファイルという扱いにしている
-      (temporary-buffer-uri buffer)))
+      (format nil "buffer://~A" (buffer-name buffer))))
+
+(defun compute-root-uri (spec buffer)
+  (pathname-to-uri
+   (language-mode:find-root-directory (buffer-directory buffer)
+                                      (spec-root-uri-patterns spec))))
+
+;;;
+(defclass workspace ()
+  ((root-uri
+    :initarg :root-uri
+    :initform nil
+    :accessor workspace-root-uri)
+   (client
+    :initarg :client
+    :initform nil
+    :accessor workspace-client)
+   (spec
+    :initarg :spec
+    :initform nil
+    :accessor workspace-spec)
+   (server-capabilities
+    :initarg :server-capabilities
+    :initform nil
+    :accessor workspace-server-capabilities)
+   (server-info
+    :initarg :server-info
+    :initform nil
+    :accessor workspace-server-info)
+   (trigger-characters
+    :initarg :trigger-characters
+    :initform (make-hash-table)
+    :accessor workspace-trigger-characters)
+   (plist
+    :initarg :plist
+    :initform nil
+    :accessor workspace-plist)))
+
+(defun make-workspace (&key spec client buffer)
+  (make-instance 'workspace
+                 :spec spec
+                 :client client
+                 :root-uri (compute-root-uri spec buffer)))
+
+(defun workspace-value (workspace key &optional default)
+  (getf (workspace-plist workspace) key default))
+
+(defun (setf workspace-value) (value workspace key &optional default)
+  (declare (ignore default))
+  (setf (getf (workspace-plist workspace) key) value))
+
+(defun workspace-language-id (workspace)
+  (spec-language-id (workspace-spec workspace)))
 
 (defun get-workspace-from-point (point)
   (buffer-workspace (point-buffer point)))
 
+(defun dispose-workspace (workspace)
+  (client:dispose (workspace-client workspace)))
+
+(defun set-trigger-characters (workspace)
+  (dolist (character (get-completion-trigger-characters workspace))
+    (setf (gethash character (workspace-trigger-characters workspace))
+          #'completion-with-trigger-character))
+  (dolist (character (get-signature-help-trigger-characters workspace))
+    (setf (gethash character (workspace-trigger-characters workspace))
+          #'lsp-signature-help-with-trigger-character)))
+
+;;;
+(defvar *workspace-list-per-language-id* (make-hash-table :test 'equal))
+
+(defstruct workspace-list
+  current-workspace
+  workspaces)
+
+(defun add-workspace (workspace)
+  (if-let (workspace-list (gethash (workspace-language-id workspace)
+                                   *workspace-list-per-language-id*))
+    (progn
+      (setf (workspace-list-current-workspace workspace-list)
+            workspace)
+      (push workspace (workspace-list-workspaces workspace-list)))
+    (setf (gethash (workspace-language-id workspace)
+                   *workspace-list-per-language-id*)
+          (make-workspace-list :current-workspace workspace
+                               :workspaces (list workspace)))))
+
+(defun change-workspace (workspace)
+  (let ((workspace-list (gethash (workspace-language-id workspace)
+                                 *workspace-list-per-language-id*)))
+    (assert workspace-list)
+    (setf (workspace-list-current-workspace workspace-list) workspace)))
+
+(defun find-workspace (language-id &key (errorp t))
+  (if-let (workspace-list (gethash language-id *workspace-list-per-language-id*))
+    (workspace-list-current-workspace workspace-list)
+    (when errorp
+      (error "The ~A workspace is not found." language-id))))
+
+(defun buffer-workspace (buffer &optional (errorp t))
+  (find-workspace (buffer-language-id buffer) :errorp errorp))
+
+(defun all-workspaces ()
+  (loop :for workspace-list :being :each :hash-value :in *workspace-list-per-language-id*
+        :append (workspace-list-workspaces workspace-list)))
+
+(defun dispose-all-workspaces ()
+  (dolist (workspace (all-workspaces))
+    (dispose-workspace workspace)))
+
+;;;
 (defvar *lsp-mode-keymap* (make-keymap))
 
 (define-key *lsp-mode-keymap* "C-c h" 'lsp-hover)
@@ -282,11 +239,11 @@
     (:name "lsp"
      :keymap *lsp-mode-keymap*
      :enable-hook 'enable-hook)
-  (setf (variable-value 'lem.language-mode:completion-spec)
-        (lem.completion-mode:make-completion-spec 'text-document/completion :async t))
-  (setf (variable-value 'lem.language-mode:find-definitions-function)
+  (setf (variable-value 'language-mode:completion-spec)
+        (lem/completion-mode:make-completion-spec 'text-document/completion :async t))
+  (setf (variable-value 'language-mode:find-definitions-function)
         #'find-definitions)
-  (setf (variable-value 'lem.language-mode:find-references-function)
+  (setf (variable-value 'language-mode:find-references-function)
         #'find-references)
   (setf (buffer-value (current-buffer) 'revert-buffer-function)
         #'lsp-revert-buffer))
@@ -296,12 +253,11 @@
     (unless (buffer-temporary-p buffer)
       (handler-case
           (progn
-            (add-hook *exit-editor-hook* 'quit-all-server-process)
+            (add-hook *exit-editor-hook* 'dispose-all-workspaces)
             (ensure-lsp-buffer buffer
-                               (lambda ()
-                                 (text-document/did-open buffer)
-                                 (enable-document-highlight-idle-timer)
-                                 (redraw-display))))
+                               :then (lambda ()
+                                       (text-document/did-open buffer)
+                                       (enable-document-highlight-idle-timer))))
         (editor-error (c)
           (show-message (princ-to-string c)))))))
 
@@ -318,35 +274,6 @@
                     (lem::revert-buffer-internal buffer)
                     (reopen-buffer buffer))
     (add-hook (variable-value 'before-change-functions :buffer buffer) 'handle-change-buffer)))
-
-(defun find-root-pathname (directory uri-patterns)
-  (or (utils:find-root-pathname directory
-                                (lambda (file)
-                                  (let ((file-name (file-namestring file)))
-                                    (dolist (uri-pattern uri-patterns)
-                                      (when (search uri-pattern file-name)
-                                        (return t))))))
-      (pathname directory)))
-
-(defun get-connected-port (spec)
-  (let ((server-info (get-running-server-info spec)))
-    (assert server-info)
-    (server-info-port server-info)))
-
-(defun get-spec-process (spec)
-  (let ((server-info (get-running-server-info spec)))
-    (assert server-info)
-    (server-info-process server-info)))
-
-(defun make-client (spec)
-  (ecase (spec-mode spec)
-    (:tcp (make-instance 'client:tcp-client :port (get-connected-port spec)))
-    (:stdio (make-instance 'client:stdio-client :process (get-spec-process spec)))))
-
-(defun make-client-and-connect (spec)
-  (let ((client (make-client spec)))
-    (client:jsonrpc-connect client)
-    client))
 
 (defun convert-to-characters (string-characters)
   (map 'list
@@ -405,87 +332,91 @@
         (change-event (buffer-change-event-to-content-change-event point arg)))
     (text-document/did-change buffer (make-lsp-array change-event))))
 
-(defun assign-workspace-to-buffer (buffer workspace)
-  (setf (buffer-workspace buffer) workspace)
+(defun add-buffer-hooks (buffer)
   (add-hook (variable-value 'kill-buffer-hook :buffer buffer) 'text-document/did-close)
   (add-hook (variable-value 'after-save-hook :buffer buffer) 'text-document/did-save)
   (add-hook (variable-value 'before-change-functions :buffer buffer) 'handle-change-buffer)
-  (add-hook (variable-value 'self-insert-after-hook :buffer buffer) 'self-insert-hook)
-  (dolist (character (get-completion-trigger-characters workspace))
-    (setf (gethash character (workspace-trigger-characters workspace))
-          #'completion-with-trigger-character))
-  (dolist (character (get-signature-help-trigger-characters workspace))
-    (setf (gethash character (workspace-trigger-characters workspace))
-          #'lsp-signature-help-with-trigger-character)))
+  (add-hook (variable-value 'self-insert-after-hook :buffer buffer) 'self-insert-hook))
+
+(defun register-lsp-method (workspace method function)
+  (jsonrpc:expose (lem-language-client/client:client-connection (workspace-client workspace))
+                  method
+                  function))
 
 (defun initialize-workspace (workspace continuation)
-  (jsonrpc:expose (client:client-connection (workspace-client workspace))
-                  "textDocument/publishDiagnostics"
-                  'text-document/publish-diagnostics)
-  (jsonrpc:expose (client:client-connection (workspace-client workspace))
-                  "window/showMessage"
-                  'window/show-message)
+  (register-lsp-method workspace
+                       "textDocument/publishDiagnostics"
+                       'text-document/publish-diagnostics)
+  (register-lsp-method workspace
+                       "window/showMessage"
+                       'window/show-message)
+  (register-lsp-method workspace
+                       "window/logMessage"
+                       'window/log-message)
   (initialize workspace
               (lambda ()
                 (initialized workspace)
-                (push workspace *workspaces*)
                 (funcall continuation workspace))))
 
-(defun establish-connection (spec)
-  (when (ensure-running-server-process spec)
-    (let ((client (make-client spec)))
-      (loop :with condition := nil
-            :repeat 6
-            :do (handler-case (with-yason-bindings ()
-                                (client:jsonrpc-connect client))
-                  (:no-error (&rest values)
-                    (declare (ignore values))
-                    (return client))
-                  (error (c)
-                    (setq condition c)
-                    (sleep 0.5)))
-            :finally (editor-error
-                      "Could not establish a connection with the Language Server (condition: ~A)"
-                      condition)))))
+(defun connect (client continuation)
+  (bt:make-thread
+   (lambda ()
+     (loop :with condition := nil
+           :repeat 20
+           :do (handler-case (with-yason-bindings ()
+                               (lem-language-client/client:jsonrpc-connect client))
+                 (:no-error (&rest values)
+                   (declare (ignore values))
+                   (send-event continuation)
+                   (return))
+                 (error (c)
+                   (setq condition c)
+                   (sleep 0.5)))
+           :finally (send-event
+                     (lambda ()
+                       (editor-error
+                        "Could not establish a connection with the Language Server (condition: ~A)"
+                        condition)))))))
 
 (defgeneric initialized-workspace (mode workspace)
   (:method (mode workspace)))
 
-(defun ensure-lsp-buffer (buffer &optional continuation)
-  (let* ((spec (buffer-language-spec buffer))
-         (root-uri (pathname-to-uri
-                    (find-root-pathname (buffer-directory buffer)
-                                        (spec-root-uri-patterns spec)))))
-    (handler-bind ((error (lambda (c)
-                            (log:info c (princ-to-string c))
-                            (kill-server-process spec))))
-      (let ((new-client (establish-connection spec)))
-        (cond ((null new-client)
-               (let ((workspace (find-workspace (spec-language-id spec) :errorp t)))
-                 (assign-workspace-to-buffer buffer workspace)
-                 (when continuation (funcall continuation))))
-              (t
-               (let ((spinner (spinner:start-loading-spinner
-                               :modeline
-                               :loading-message "initializing"
-                               :buffer buffer)))
-                 (initialize-workspace
-                  (make-workspace :client new-client
-                                  :root-uri root-uri
-                                  :spec spec)
-                  (lambda (workspace)
-                    (assign-workspace-to-buffer buffer workspace)
-                    (when continuation (funcall continuation))
-                    (spinner:stop-loading-spinner spinner)
-                    (let ((mode (lem::ensure-mode-object (buffer-language-mode buffer))))
-                      (initialized-workspace mode workspace))
-                    (redraw-display))))))))))
+(defun connect-and-initialize (workspace buffer continuation)
+  (let ((spinner (spinner:start-loading-spinner
+                  :modeline
+                  :loading-message "initializing"
+                  :buffer buffer)))
+    (connect (workspace-client workspace)
+             (lambda ()
+               (initialize-workspace
+                workspace
+                (lambda (workspace)
+                  (add-workspace workspace)
+                  (set-trigger-characters workspace)
+                  (add-buffer-hooks buffer)
+                  (when continuation (funcall continuation))
+                  (let ((mode (ensure-mode-object
+                               (spec-mode
+                                (workspace-spec workspace)))))
+                    (initialized-workspace mode workspace))
+                  (spinner:stop-loading-spinner spinner)
+                  (redraw-display)))))))
+
+(defun ensure-lsp-buffer (buffer &key ((:then continuation)))
+  (let ((spec (buffer-language-spec buffer)))
+    (if-let ((workspace (find-workspace (spec-language-id spec) :errorp nil)))
+      (progn
+        (add-buffer-hooks buffer)
+        (when continuation (funcall continuation)))
+      (let ((client (run-server spec)))
+        (connect-and-initialize (make-workspace :spec spec
+                                                :client client
+                                                :buffer buffer)
+                                buffer
+                                continuation)))))
 
 (defun check-connection ()
-  (let* ((buffer (current-buffer))
-         (spec (buffer-language-spec buffer)))
-    (unless (get-running-server-info spec)
-      (ensure-lsp-buffer buffer))))
+  (assert (buffer-language-spec (current-buffer))))
 
 (defun buffer-to-text-document-item (buffer)
   (make-instance 'lsp:text-document-item
@@ -502,9 +433,13 @@
   (list :text-document (make-text-document-identifier (point-buffer point))
         :position (point-to-lsp-position point)))
 
+(defun make-text-document-position-params (point)
+  (apply #'make-instance
+         'lsp:text-document-position-params
+         (make-text-document-position-arguments point)))
+
 (defun find-buffer-from-uri (uri)
-  (let ((pathname (uri-to-pathname uri)))
-    (find-file-buffer pathname)))
+  (find uri (buffer-list) :key #'buffer-uri :test #'equal))
 
 (defun get-buffer-from-text-document-identifier (text-document-identifier)
   (let ((uri (lsp:text-document-identifier-uri text-document-identifier)))
@@ -568,13 +503,27 @@
 
 ;;; General Messages
 
+(defgeneric spec-initialization-options (spec)
+  (:method (spec) nil))
+
+(defparameter *client-capabilities-text*
+  (load-time-value
+   (uiop:read-file-string
+    (asdf:system-relative-pathname :lem-lsp-mode
+                                   "client-capabilities.json"))))
+
+(defun client-capabilities ()
+  (convert-from-json
+   (parse-json *client-capabilities-text*)
+   'lsp:client-capabilities))
+
 (defun initialize (workspace continuation)
   (async-request
    (workspace-client workspace)
    (make-instance 'lsp:initialize)
    (apply #'make-instance
           'lsp:initialize-params
-          :process-id (utils:get-pid)
+          :process-id (get-pid)
           :client-info (make-lsp-map :name "lem" #|:version "0.0.0"|#)
           :root-uri (workspace-root-uri workspace)
           :capabilities (client-capabilities)
@@ -601,7 +550,6 @@
 
 ;; TODO
 ;; - window/showMessageRequest
-;; - window/logMessage
 ;; - window/workDoneProgress/create
 ;; - window/workDoenProgress/cancel
 
@@ -623,6 +571,23 @@
                   (display-popup-message text
                                          :style '(:gravity :top)
                                          :timeout 3)))))
+
+(defun log-message (text)
+  (let ((buffer (make-buffer "*lsp output*")))
+    (with-point ((point (buffer-point buffer) :left-inserting))
+      (buffer-end point)
+      (unless (start-line-p point)
+        (insert-character point #\newline))
+      (insert-string point text))
+    (when (get-buffer-windows buffer)
+      (redraw-display))))
+
+(defun window/log-message (params)
+  (request::do-request-log "window/logMessage" params :from :server)
+  (let* ((params (convert-from-json params 'lsp:log-message-params))
+         (text (lsp:log-message-params-message params)))
+    (send-event (lambda ()
+                  (log-message text)))))
 
 ;;; Text Synchronization
 
@@ -736,8 +701,8 @@
     (setf (buffer-diagnostic-idle-timer buffer) nil)))
 
 (defun point-to-xref-position (point)
-  (lem.language-mode::make-xref-position :line-number (line-number-at-point point)
-                                         :charpos (point-charpos point)))
+  (language-mode::make-xref-position :line-number (line-number-at-point point)
+                                     :charpos (point-charpos point)))
 
 (defun highlight-diagnostic (buffer diagnostic)
   (with-point ((start (buffer-point buffer))
@@ -773,7 +738,9 @@
     (do-sequence (diagnostic (lsp:publish-diagnostics-params-diagnostics params))
       (highlight-diagnostic buffer diagnostic))
     (setf (buffer-diagnostic-idle-timer buffer)
-          (start-idle-timer 1000 t #'popup-diagnostic nil "lsp-diagnostic"))))
+          (start-timer (make-idle-timer #'popup-diagnostic :name "lsp-diagnostic")
+                       200
+                       t))))
 
 (defun popup-diagnostic ()
   (dolist (overlay (buffer-diagnostic-overlays (current-buffer)))
@@ -790,31 +757,28 @@
 
 (define-command lsp-document-diagnostics () ()
   (when-let ((diagnostics (buffer-diagnostics (current-buffer))))
-    (lem.sourcelist:with-sourcelist (sourcelist "*Diagnostics*")
+    (lem/peek-source:with-collecting-sources (collector)
       (dolist (diagnostic diagnostics)
-        (lem.sourcelist:append-sourcelist
-         sourcelist
-         (lambda (point)
-           (insert-string point (buffer-filename (diagnostic-buffer diagnostic))
-                          :attribute 'lem.sourcelist:title-attribute)
-           (insert-string point ":")
-           (insert-string point
-                          (princ-to-string (lem.language-mode::xref-position-line-number
-                                            (diagnostic-position diagnostic)))
-                          :attribute 'lem.sourcelist:position-attribute)
-           (insert-string point ":")
-           (insert-string point
-                          (princ-to-string (lem.language-mode::xref-position-charpos
-                                            (diagnostic-position diagnostic)))
-                          :attribute 'lem.sourcelist:position-attribute)
-           (insert-string point ":")
-           (insert-string point (diagnostic-message diagnostic)))
-         (let ((diagnostic diagnostic))
-           (lambda (set-buffer-fn)
-             (funcall set-buffer-fn (diagnostic-buffer diagnostic))
-             (lem.language-mode:move-to-xref-location-position
-              (buffer-point (diagnostic-buffer diagnostic))
-              (diagnostic-position diagnostic)))))))))
+        (lem/peek-source:with-appending-source
+            (point :move-function (let ((diagnostic diagnostic))
+                                    (lambda ()
+                                      (language-mode:move-to-xref-location-position
+                                       (buffer-point (diagnostic-buffer diagnostic))
+                                       (diagnostic-position diagnostic)))))
+          (insert-string point (buffer-filename (diagnostic-buffer diagnostic))
+                         :attribute 'lem/peek-source:filename-attribute)
+          (insert-string point ":")
+          (insert-string point
+                         (princ-to-string (language-mode::xref-position-line-number
+                                           (diagnostic-position diagnostic)))
+                         :attribute 'lem/peek-source:position-attribute)
+          (insert-string point ":")
+          (insert-string point
+                         (princ-to-string (language-mode::xref-position-charpos
+                                           (diagnostic-position diagnostic)))
+                         :attribute 'lem/peek-source:position-attribute)
+          (insert-string point ":")
+          (insert-string point (diagnostic-message diagnostic)))))))
 
 ;;; hover
 
@@ -825,61 +789,85 @@
 ;; - hoverのrangeを使って範囲に背景色をつける
 ;; - serverでサポートしているかのチェックをする
 
+(defun trim-final-newlines (point)
+  (with-point ((start point :left-inserting)
+               (end point :left-inserting))
+    (buffer-end start)
+    (buffer-end end)
+    (skip-whitespace-backward start)
+    (delete-between-points start end)))
+
 (defun markdown-buffer (markdown-text)
   (labels ((make-markdown-buffer (markdown-text)
-             (let* ((buffer (make-buffer nil
-                                         :temporary t
-                                         :enable-undo-p nil))
+             (let* ((buffer (make-temporary-unwrap-buffer))
                     (point (buffer-point buffer)))
-               (setf (variable-value 'lem:line-wrap :buffer buffer) nil)
                (setf (variable-value 'enable-syntax-highlight :buffer buffer) t)
                (erase-buffer buffer)
                (insert-string point markdown-text)
                (put-foreground buffer)
                buffer))
+           (get-syntax-table-from-mode (mode-name)
+             (when-let* ((mode (lem::find-mode mode-name))
+                         (syntax-table (mode-syntax-table mode)))
+               syntax-table))
+
+           (put-foreground (buffer)
+             (put-text-property (buffer-start-point buffer)
+                                (buffer-end-point buffer)
+                                :attribute (make-attribute :foreground "#F0F0F0")))
+
            (delete-line (point)
              (with-point ((start point)
                           (end point))
                (line-start start)
                (line-end end)
                (delete-between-points start end)))
-           (put-foreground (buffer)
-             (put-text-property (buffer-start-point buffer)
-                                (buffer-end-point buffer)
-                                :attribute (make-attribute :foreground "#F0F0F0")))
-           (get-syntax-table-from-mode (mode-name)
-             (when-let* ((mode (lem::find-mode mode-name))
-                         (syntax-table (mode-syntax-table mode)))
-               syntax-table)))
+           (process-header (point)
+             (buffer-start point)
+             (loop :while (search-forward-regexp point "^#+\\s*")
+                   :do (with-point ((start point))
+                         (line-start start)
+                         (delete-between-points start point)
+                         (line-end point)
+                         (put-text-property start
+                                            point
+                                            :attribute (make-attribute :bold-p t)))))
+           (process-code-block (point)
+             (buffer-start point)
+             (loop :while (search-forward-regexp point "^```")
+                   :do (with-point ((start point :right-inserting)
+                                    (end point :right-inserting))
+                         (let* ((mode-name (looking-at start "[\\w-]+"))
+                                (syntax-table (get-syntax-table-from-mode mode-name)))
+                           (line-start start)
+                           (unless (search-forward-regexp end "^```") (return))
+                           (delete-line start)
+                           (delete-line end)
+                           (syntax-scan-region start end :syntax-table syntax-table)
+                           (apply-region-lines start
+                                               end
+                                               (lambda (point)
+                                                 (line-start point)
+                                                 (insert-string point " ")
+                                                 (line-end point)
+                                                 (insert-string point " ")))))))
+           (process-horizontal-line (point)
+             (buffer-start point)
+             (let ((width (lem/popup-window::compute-buffer-width (point-buffer point))))
+               (loop :while (search-forward-regexp point "^-+$")
+                     :do (with-point ((start point :right-inserting)
+                                      (end point :left-inserting))
+                           (line-start start)
+                           (line-end end)
+                           (delete-between-points start end)
+                           (insert-string start (make-string width :initial-element #\─))
+                           (insert-character end #\newline))))))
     (let* ((buffer (make-markdown-buffer markdown-text))
            (point (buffer-point buffer)))
-      (buffer-start point)
-      (loop :while (search-forward-regexp point "^#+\\s*")
-            :do (with-point ((start point))
-                  (line-start start)
-                  (delete-between-points start point)
-                  (line-end point)
-                  (put-text-property start
-                                     point
-                                     :attribute (make-attribute :bold-p t))))
-      (buffer-start point)
-      (loop :while (search-forward-regexp point "^```")
-            :do (with-point ((start point :right-inserting)
-                             (end point :right-inserting))
-                  (let* ((mode-name (looking-at start "[\\w-]+"))
-                         (syntax-table (get-syntax-table-from-mode mode-name)))
-                    (line-start start)
-                    (unless (search-forward-regexp end "^```") (return))
-                    (delete-line start)
-                    (delete-line end)
-                    (syntax-scan-region start end :syntax-table syntax-table)
-                    (apply-region-lines start
-                                        end
-                                        (lambda (point)
-                                          (line-start point)
-                                          (insert-string point " ")
-                                          (line-end point)
-                                          (insert-string point " "))))))
+      (process-header point)
+      (process-code-block point)
+      (process-horizontal-line point)
+      (trim-final-newlines point)
       buffer)))
 
 (defun contents-to-string (contents)
@@ -982,15 +970,19 @@
                 :sort-text (handler-case (lsp:completion-item-sort-text item)
                              (unbound-slot ()
                                (lsp:completion-item-label item)))
-                :focus-action (when-let ((documentation
-                                          (handler-case (lsp:completion-item-documentation item)
-                                            (unbound-slot () nil))))
-                                (lambda ()
-                                  (when-let ((result (contents-to-markdown-buffer documentation)))
-                                    (display-message result
-                                                     :gravity :adjacent-window
-                                                     :source-window (lem.popup-window::popup-menu-window
-                                                                     lem.popup-window::*popup-menu*)))))))))
+                :focus-action (when-let* ((documentation
+                                           (handler-case (lsp:completion-item-documentation item)
+                                             (unbound-slot () nil)))
+                                          (result
+                                           (contents-to-markdown-buffer documentation)))
+                                (lambda (context)
+                                  (display-message
+                                   result
+                                   :style `(:gravity :vertically-adjacent-window
+                                            :offset-y -1
+                                            :offset-x 1)
+                                   :source-window (lem/popup-menu::popup-menu-window
+                                                   (lem/completion-mode::context-popup-menu context)))))))))
     (sort-items
      (map 'list
           #'make-completion-item
@@ -1027,81 +1019,109 @@
 (defun completion-with-trigger-character (c)
   (declare (ignore c))
   (check-connection)
-  (lem.language-mode::complete-symbol))
+  (language-mode::complete-symbol))
 
 ;;; signatureHelp
 
 (define-attribute signature-help-active-parameter-attribute
-  (t :underline-p t))
+  (t :background "blue" :underline-p t))
 
 (defun provide-signature-help-p (workspace)
   (handler-case (lsp:server-capabilities-signature-help-provider
                  (workspace-server-capabilities workspace))
     (unbound-slot () nil)))
 
-(defun display-signature-help (signature-help)
-  (let* ((buffer (make-buffer nil :temporary t))
-         (point (buffer-point buffer)))
-    (setf (lem:variable-value 'lem::truncate-character :buffer buffer) #\space)
-    (let ((active-parameter
-            (handler-case (lsp:signature-help-active-parameter signature-help)
-              (unbound-slot () nil)))
-          (active-signature
-            (handler-case (lsp:signature-help-active-signature signature-help)
-              (unbound-slot () nil))))
-      (do-sequence ((signature index) (lsp:signature-help-signatures signature-help))
+(defun insert-markdown (point markdown-text)
+  (insert-buffer point (markdown-buffer markdown-text)))
+
+(defun insert-markup-content (point markup-content)
+  (switch ((lsp:markup-content-kind markup-content) :test #'equal)
+    ("markdown"
+     (insert-markdown point (lsp:markup-content-value markup-content)))
+    ("plaintext"
+     (insert-string point (lsp:markup-content-value markup-content)))
+    (otherwise
+     (insert-string point (lsp:markup-content-value markup-content)))))
+
+(defun insert-documentation (point documentation)
+  (insert-character point #\newline)
+  (etypecase documentation
+    (lsp:markup-content
+     (insert-markup-content point documentation))
+    (string
+     (insert-string point documentation))))
+
+(defun highlight-signature-active-parameter (point parameters active-parameter)
+  (with-point ((point point))
+    (buffer-start point)
+    (do-sequence ((parameter index) parameters)
+      (let ((label (lsp:parameter-information-label parameter)))
+        ;; TODO: labelの型が[number, number]の場合に対応する
+        (when (stringp label)
+          (search-forward point label)
+          (when (= active-parameter index)
+            (with-point ((start point))
+              (character-offset start (- (length label)))
+              (put-text-property start
+                                 point
+                                 :attribute 'signature-help-active-parameter-attribute)
+              (return-from highlight-signature-active-parameter))))))))
+
+(defun highlight-signature (point signature active-parameter)
+  (let ((parameters
+          (handler-case (lsp:signature-information-parameters signature)
+            (unbound-slot () nil)))
+        (active-parameter
+          (handler-case (lsp:signature-information-active-parameter signature)
+            (unbound-slot () active-parameter))))
+    (when (and (plusp (length parameters))
+               (< active-parameter (length parameters)))
+      (highlight-signature-active-parameter point
+                                            parameters
+                                            active-parameter))))
+
+(defun make-signature-help-buffer (signature-help)
+  (let ((buffer (make-temporary-unwrap-buffer))
+        (active-parameter
+          (handler-case (lsp:signature-help-active-parameter signature-help)
+            (unbound-slot () 0)))
+        (active-signature
+          (handler-case (lsp:signature-help-active-signature signature-help)
+            (unbound-slot () nil)))
+        (signatures (lsp:signature-help-signatures signature-help)))
+    (do-sequence ((signature index) signatures)
+      (let ((point (buffer-point buffer)))
         (when (plusp index) (insert-character point #\newline))
-        (let ((active-signature-p (eql index active-signature)))
-          (if active-signature-p
-              (insert-string point "* ")
-              (insert-string point "- "))
-          (insert-string point
-                         (lsp:signature-information-label signature))
-          (when active-signature-p
-            (let ((parameters
-                    (handler-case
-                        (lsp:signature-information-parameters signature)
-                      (unbound-slot () nil))))
-              (when (and (plusp (length parameters))
-                         (< active-parameter (length parameters)))
-                ;; TODO: labelが[number, number]の場合に対応する
-                (let ((label (lsp:parameter-information-label
-                              (elt parameters
-                                   (if (<= 0 active-parameter (1- (length parameters)))
-                                       active-parameter
-                                       0)))))
-                  (when (stringp label)
-                    (with-point ((p point))
-                      (line-start p)
-                      (when (search-forward p label)
-                        (with-point ((start p))
-                          (character-offset start (- (length label)))
-                          (put-text-property start p
-                                             :attribute 'signature-help-active-parameter-attribute)))))))))
-          (insert-character point #\space)
-          (insert-character point #\newline)
-          (handler-case (lsp:signature-information-documentation signature)
-            (unbound-slot () nil)
-            (:no-error (documentation)
-              (if (typep documentation 'lsp:markup-content)
-                  (insert-string point (lsp:markup-content-value documentation))
-                  (insert-string point documentation))))))
-      (buffer-start (buffer-point buffer))
-      (message-buffer buffer))))
+        (insert-string point (lsp:signature-information-label signature))
+        (when (or (eql index active-signature)
+                  (length= 1 signatures))
+          (highlight-signature point signature active-parameter))
+        (insert-character point #\newline)
+        (handler-case (lsp:signature-information-documentation signature)
+          (unbound-slot () nil)
+          (:no-error (documentation)
+            (insert-documentation point documentation)))))
+    (buffer-start (buffer-point buffer))
+    buffer))
+
+(defun display-signature-help (signature-help)
+  (let ((buffer (make-signature-help-buffer signature-help)))
+    (display-message buffer)))
 
 (defun text-document/signature-help (point &optional signature-help-context)
   (when-let ((workspace (get-workspace-from-point point)))
     (when (provide-signature-help-p workspace)
-      (let ((result (request:request
-                     (workspace-client workspace)
+      (async-request (workspace-client workspace)
                      (make-instance 'lsp:text-document/signature-help)
                      (apply #'make-instance
                             'lsp:signature-help-params
                             (append (when signature-help-context
                                       `(:context ,signature-help-context))
-                                    (make-text-document-position-arguments point))))))
-        (unless (lsp-null-p result)
-          (display-signature-help result))))))
+                                    (make-text-document-position-arguments point)))
+                     :then (lambda (result)
+                             (unless (lsp-null-p result)
+                               (display-signature-help result)
+                               (redraw-display)))))))
 
 (defun lsp-signature-help-with-trigger-character (character)
   (text-document/signature-help
@@ -1159,9 +1179,9 @@
            (file (uri-to-pathname uri)))
       (declare (ignore end-position))
       (when (uiop:file-exists-p file)
-        (lem.language-mode:make-xref-location
+        (language-mode:make-xref-location
          :filespec file
-         :position (lem.language-mode::make-position
+         :position (language-mode::make-position
                     (1+ (lsp:position-line start-position))
                     (lsp:position-character start-position))
          :content (definition-location-to-content file location)))))
@@ -1188,11 +1208,12 @@
               'lsp:definition-params
               (make-text-document-position-arguments point))
        :then (lambda (response)
-               (funcall then (convert-definition-response response)))))))
+               (funcall then (convert-definition-response response))
+               (redraw-display))))))
 
 (defun find-definitions (point)
   (check-connection)
-  (text-document/definition point #'lem.language-mode:display-xref-locations))
+  (text-document/definition point #'language-mode:display-xref-locations))
 
 ;;; type definition
 
@@ -1217,7 +1238,7 @@
 
 (define-command lsp-type-definition () ()
   (check-connection)
-  (text-document/type-definition (current-point) #'lem.language-mode:display-xref-locations))
+  (text-document/type-definition (current-point) #'language-mode:display-xref-locations))
 
 ;;; implementation
 
@@ -1243,7 +1264,7 @@
 (define-command lsp-implementation () ()
   (check-connection)
   (text-document/implementation (current-point)
-                                #'lem.language-mode:display-xref-locations))
+                                #'language-mode:display-xref-locations))
 
 ;;; references
 
@@ -1254,20 +1275,20 @@
 
 (defun xref-location-to-content (location)
   (when-let*
-      ((buffer (find-file-buffer (lem.language-mode:xref-location-filespec location) :temporary t))
+      ((buffer (find-file-buffer (language-mode:xref-location-filespec location) :temporary t))
        (point (buffer-point buffer)))
-    (lem.language-mode::move-to-location-position
+    (language-mode::move-to-location-position
      point
-     (lem.language-mode:xref-location-position location))
+     (language-mode:xref-location-position location))
     (string-trim '(#\space #\tab) (line-string point))))
 
 (defun convert-references-response (value)
-  (lem.language-mode:make-xref-references
+  (language-mode:make-xref-references
    :type nil
    :locations (mapcar (lambda (location)
-                        (lem.language-mode:make-xref-location
-                         :filespec (lem.language-mode:xref-location-filespec location)
-                         :position (lem.language-mode:xref-location-position location)
+                        (language-mode:make-xref-location
+                         :filespec (language-mode:xref-location-filespec location)
+                         :position (language-mode:xref-location-position location)
                          :content (xref-location-to-content location)))
                       (convert-definition-response value))))
 
@@ -1283,12 +1304,13 @@
                                       :include-declaration include-declaration)
               (make-text-document-position-arguments point))
        :then (lambda (response)
-               (funcall then (convert-references-response response)))))))
+               (funcall then (convert-references-response response))
+               (redraw-display))))))
 
 (defun find-references (point)
   (check-connection)
   (text-document/references point
-                            #'lem.language-mode:display-xref-references))
+                            #'language-mode:display-xref-references))
 
 ;;; document highlights
 
@@ -1300,40 +1322,72 @@
                  (workspace-server-capabilities workspace))
     (unbound-slot () nil)))
 
-(defvar *document-highlight-overlays* '())
+(defstruct document-highlight-context
+  (overlays '())
+  (last-modified-tick 0))
+
+(defvar *document-highlight-context* (make-document-highlight-context))
+
+(defun document-highlight-overlays ()
+  (document-highlight-context-overlays *document-highlight-context*))
+
+(defun (setf document-highlight-overlays) (value)
+  (setf (document-highlight-context-overlays *document-highlight-context*)
+        value))
+
+(defun cursor-in-document-highlight-p ()
+  (dolist (ov (document-highlight-overlays))
+    (unless (eq (current-buffer) (overlay-buffer ov))
+      (return nil))
+    (when (point<= (overlay-start ov) (current-point) (overlay-end ov))
+      (return t))))
 
 (defun clear-document-highlight-overlays ()
-  (mapc #'delete-overlay *document-highlight-overlays*))
+  (mapc #'delete-overlay (document-highlight-overlays))
+  (setf (document-highlight-overlays) '())
+  (setf (document-highlight-context-last-modified-tick *document-highlight-context*)
+        (buffer-modified-tick (current-buffer))))
+
+(defun clear-document-highlight-overlays-if-required ()
+  (when (or (not (cursor-in-document-highlight-p))
+            (not (= (document-highlight-context-last-modified-tick *document-highlight-context*)
+                    (buffer-modified-tick (current-buffer))))
+            (mode-active-p (current-buffer) 'lem/isearch:isearch-mode))
+    (clear-document-highlight-overlays)
+    t))
 
 (defun display-document-highlights (buffer document-highlights)
-  (clear-document-highlight-overlays)
   (with-point ((start (buffer-point buffer))
                (end (buffer-point buffer)))
     (do-sequence (document-highlight document-highlights)
-      (let* ((range (lsp:document-highlight-range document-highlight)))
+      (let ((range (lsp:document-highlight-range document-highlight)))
         (move-to-lsp-position start (lsp:range-start range))
         (move-to-lsp-position end (lsp:range-end range))
         (push (make-overlay start end 'document-highlight-text-attribute)
-              *document-highlight-overlays*)))))
+              (document-highlight-overlays))))))
 
 (defun text-document/document-highlight (point)
   (when-let ((workspace (get-workspace-from-point point)))
     (when (provide-document-highlight-p workspace)
-      (async-request
-       (workspace-client workspace)
-       (make-instance 'lsp:text-document/document-highlight)
-       (apply #'make-instance
-              'lsp:document-highlight-params
-              (make-text-document-position-arguments point))
-       :then (lambda (value)
-               (unless (lsp-null-p value)
-                 (display-document-highlights (point-buffer point)
-                                              value)
-                 (redraw-display)))))))
+      (unless (cursor-in-document-highlight-p)
+        (let ((counter (lem::command-loop-counter)))
+          (async-request
+           (workspace-client workspace)
+           (make-instance 'lsp:text-document/document-highlight)
+           (apply #'make-instance
+                  'lsp:document-highlight-params
+                  (make-text-document-position-arguments point))
+           :then (lambda (value)
+                   (unless (lsp-null-p value)
+                     (when (= counter (lem::command-loop-counter))
+                       (display-document-highlights (point-buffer point)
+                                                    value)
+                       (redraw-display))))))))))
 
 (defun document-highlight-calls-timer ()
   (when (mode-active-p (current-buffer) 'lsp-mode)
-    (text-document/document-highlight (current-point))))
+    (when (buffer-workspace (current-buffer) nil)
+      (text-document/document-highlight (current-point)))))
 
 (define-command lsp-document-highlight () ()
   (when (mode-active-p (current-buffer) 'lsp-mode)
@@ -1345,13 +1399,13 @@
 (defun enable-document-highlight-idle-timer ()
   (unless *document-highlight-idle-timer*
     (setf *document-highlight-idle-timer*
-          (start-idle-timer 500 t #'document-highlight-calls-timer nil
-                            "lsp-document-highlight"))))
+          (start-timer (make-idle-timer #'document-highlight-calls-timer
+                                        :name "lsp-document-highlight")
+                       200
+                       t))))
 
-(define-condition lsp-after-executing-command (after-executing-command) ())
-(defmethod handle-signal ((condition lsp-after-executing-command))
-  (when (mode-active-p (current-buffer) 'lsp-mode)
-    (clear-document-highlight-overlays)))
+(defmethod execute :after ((mode lsp-mode) command argument)
+  (clear-document-highlight-overlays-if-required))
 
 ;;; document symbols
 
@@ -1532,43 +1586,34 @@
 (define-attribute document-symbol-detail-attribute
   (t :foreground "gray"))
 
-(defun append-document-symbol-item (sourcelist buffer document-symbol nest-level)
+(defun append-document-symbol-item (buffer document-symbol nest-level)
   (let ((selection-range (lsp:document-symbol-selection-range document-symbol))
         (range (lsp:document-symbol-range document-symbol)))
-    (lem.sourcelist:append-sourcelist
-     sourcelist
-     (lambda (point)
-       (multiple-value-bind (kind-name attribute)
-           (symbol-kind-to-string-and-attribute (lsp:document-symbol-kind document-symbol))
-         (insert-string point (make-string (* 2 nest-level) :initial-element #\space))
-         (insert-string point (format nil "[~A]" kind-name) :attribute attribute)
-         (insert-character point #\space)
-         (insert-string point (lsp:document-symbol-name document-symbol))
-         (insert-string point " ")
-         (when-let (detail (handler-case (lsp:document-symbol-detail document-symbol)
-                             (unbound-slot () nil)))
-           (insert-string point detail :attribute 'document-symbol-detail-attribute))))
-     (lambda (set-buffer-fn)
-       (funcall set-buffer-fn buffer)
-       (let ((point (buffer-point buffer)))
-         (move-to-lsp-position point (lsp:range-start selection-range))))
-     :highlight-overlay-function (lambda (point)
-                                   (with-point ((start point)
-                                                (end point))
-                                     (make-overlay
-                                      (move-to-lsp-position start (lsp:range-start range))
-                                      (move-to-lsp-position end (lsp:range-end range))
-                                      'lem.sourcelist::jump-highlight)))))
+    (declare (ignore range)) ; TODO: rangeをリージョンのハイライトに使う
+    (lem/peek-source:with-appending-source
+        (point :move-function (lambda ()
+                                (let ((point (buffer-point buffer)))
+                                  (move-to-lsp-position point (lsp:range-start selection-range)))))
+      (multiple-value-bind (kind-name attribute)
+          (symbol-kind-to-string-and-attribute (lsp:document-symbol-kind document-symbol))
+        (insert-string point (make-string (* 2 nest-level) :initial-element #\space))
+        (insert-string point (format nil "[~A]" kind-name) :attribute attribute)
+        (insert-character point #\space)
+        (insert-string point (lsp:document-symbol-name document-symbol))
+        (insert-string point " ")
+        (when-let (detail (handler-case (lsp:document-symbol-detail document-symbol)
+                            (unbound-slot () nil)))
+          (insert-string point detail :attribute 'document-symbol-detail-attribute)))))
   (do-sequence
       (document-symbol
        (handler-case (lsp:document-symbol-children document-symbol)
          (unbound-slot () nil)))
-    (append-document-symbol-item sourcelist buffer document-symbol (1+ nest-level))))
+    (append-document-symbol-item buffer document-symbol (1+ nest-level))))
 
 (defun display-document-symbol-response (buffer value)
-  (lem.sourcelist:with-sourcelist (sourcelist "*Document Symbol*")
+  (lem/peek-source:with-collecting-sources (collector)
     (do-sequence (item value)
-      (append-document-symbol-item sourcelist buffer item 0))))
+      (append-document-symbol-item buffer item 0))))
 
 (defun text-document/document-symbol (buffer)
   (when-let ((workspace (buffer-workspace buffer)))
@@ -1623,13 +1668,19 @@
       (etypecase command-or-code-action
         (lsp:code-action
          (let ((code-action command-or-code-action))
-           (push (context-menu:make-item :label (lsp:code-action-title code-action)
-                                         :callback (curry #'execute-code-action workspace code-action))
+           (push (make-instance 'context-menu:item
+                                :label (lsp:code-action-title code-action)
+                                :callback (lambda (window)
+                                            (declare (ignore window))
+                                            (execute-code-action workspace code-action)))
                  items)))
         (lsp:command
          (let ((command command-or-code-action))
-           (push (context-menu:make-item :label (lsp:command-title command)
-                                         :callback (curry #'execute-command workspace command))
+           (push (make-instance 'context-menu:item
+                                :label (lsp:command-title command)
+                                :callback (lambda (window)
+                                            (declare (ignore window))
+                                            (execute-command workspace command)))
                  items)))))
     (nreverse items)))
 
@@ -1674,8 +1725,10 @@
 (defun organize-imports (buffer)
   (let ((response (text-document/code-action (buffer-point buffer)))
         (workspace (buffer-workspace buffer)))
-    (when-let (code-action (find-organize-imports response))
-      (execute-code-action workspace code-action))))
+    (unless (lsp-null-p response)
+      (let ((code-action (find-organize-imports response)))
+        (unless (lsp-null-p code-action)
+          (execute-code-action workspace code-action))))))
 
 (define-command lsp-organize-imports () ()
   (organize-imports (current-buffer)))
@@ -1797,9 +1850,11 @@
 
 ;;;
 (define-command lsp-restart-server () ()
-  (when-let ((spec (buffer-language-spec (current-buffer))))
-    (kill-server-process spec)
-    (ensure-lsp-buffer (current-buffer))))
+  (dispose-workspace (buffer-workspace (current-buffer)))
+  ;; TODO:
+  ;; 現在のバッファを開き直すだけでは不十分
+  ;; buffer-listを全て見る必要がある
+  (ensure-lsp-buffer (current-buffer)))
 
 ;;;
 (defun enable-lsp-mode ()
@@ -1807,11 +1862,13 @@
 
 (defmacro define-language-spec ((spec-name major-mode) &body initargs)
   `(progn
-     (register-language-spec ',major-mode ',spec-name)
      ,(when (lem::mode-hook-variable major-mode)
         `(add-hook ,(lem::mode-hook-variable major-mode) 'enable-lsp-mode))
-     (defclass ,spec-name (spec) ()
-       (:default-initargs ,@initargs))))
+     (eval-when (:compile-toplevel :load-toplevel :execute)
+       (defclass ,spec-name (lem-lsp-mode/spec::spec) ()
+         (:default-initargs ,@initargs
+          :mode ',major-mode)))
+     (register-language-spec ',major-mode (make-instance ',spec-name))))
 
 #|
 (define-language-spec (js-spec lem-js-mode:js-mode)
@@ -1820,21 +1877,21 @@
   :command '("typescript-language-server" "--stdio")
   :install-command "npm install -g typescript-language-server typescript"
   :readme-url "https://github.com/typescript-language-server/typescript-language-server"
-  :mode :stdio)
+  :connection-mode :stdio)
 
 (define-language-spec (rust-spec lem-rust-mode:rust-mode)
   :language-id "rust"
   :root-uri-patterns '("Cargo.toml")
   :command '("rls")
   :readme-url "https://github.com/rust-lang/rls"
-  :mode :stdio)
+  :connection-mode :stdio)
 
 (define-language-spec (sql-spec lem-sql-mode:sql-mode)
   :language-id "sql"
   :root-uri-patterns '()
   :command '("sql-language-server" "up" "--method" "stdio")
   :readme-url "https://github.com/joe-re/sql-language-server"
-  :mode :stdio)
+  :connection-mode :stdio)
 
 (defun find-dart-bin-path ()
   (multiple-value-bind (output error-output status)
@@ -1862,7 +1919,7 @@
 (define-language-spec (dart-spec lem-dart-mode:dart-mode)
   :language-id "dart"
   :root-uri-patterns '("pubspec.yaml")
-  :mode :stdio)
+  :connection-mode :stdio)
 
 (defmethod spec-command ((spec dart-spec))
   (if-let ((lsp-path (find-dart-language-server)))

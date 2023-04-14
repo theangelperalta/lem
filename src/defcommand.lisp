@@ -63,45 +63,66 @@
              ,(parse-arg-descriptors arg-descriptors universal-argument)
            (apply #',fn-name ,arguments))))))
 
-(defun primary-class (options)
-  (let ((value (alexandria:assoc-value options :primary-class)))
-    (cond ((null value)
-           +primary-command-class-name+)
-          (t
-           (assert (alexandria:length= value 1))
-           (first value)))))
+(defun check-already-defined-command (name source-location)
+  #+sbcl
+  (alexandria:when-let* ((command (get-command name))
+                         (command-source-location (command-source-location command)))
+    (unless (equal (sb-c:definition-source-location-namestring command-source-location)
+                   (sb-c:definition-source-location-namestring source-location))
+      (cerror "continue"
+              "~A is already defined in another file ~A"
+              name
+              (sb-c:definition-source-location-namestring (command-source-location command))))))
 
-(defmacro define-command (&whole form name-and-options params (&rest arg-descriptors) &body body)
+(defun register-command (command &key mode-name command-name)
+  (when mode-name
+     (associate-command-with-mode mode-name command))
+  (add-command command-name command))
+
+(defmacro define-command (name-and-options params (&rest arg-descriptors) &body body)
   (destructuring-bind (name . options) (uiop:ensure-list name-and-options)
-    (let ((primary-class (primary-class options))
-          (advice-classes (alexandria:assoc-value options :advice-classes))
+    (let ((advice-classes (alexandria:assoc-value options :advice-classes))
           (class-name (alexandria:if-let (elt (assoc :class options))
                         (second elt)
                         name))
           (command-name (alexandria:if-let (elt (assoc :name options))
                           (second elt)
-                          (string-downcase name))))
+                          (string-downcase name)))
+          (mode-name (second (assoc :mode options))))
+
+      (check-type command-name string)
+      (check-type mode-name (or null symbol))
+
       (alexandria:with-unique-names (command universal-argument)
         `(progn
-           (add-command ,command-name
-                        (make-cmd :name ',name
-                                  :form ',form
-                                  :source-location #+sbcl (sb-c:source-location) #-sbcl nil))
+           (check-already-defined-command ',name
+                                          #+sbcl (sb-c:source-location)
+                                          #-sbcl nil)
+
            (defun ,name ,params
              ;; コマンドではなく直接この関数を呼び出した場合
              ;; - *this-command*が束縛されない
              ;; - executeのフックが使えない
              ,@body)
-           (defclass ,class-name (,primary-class ,@advice-classes) ())
+
            (register-command-class ',name ',class-name)
+           (defclass ,class-name (primary-command ,@advice-classes)
+             ()
+             (:default-initargs
+              :source-location #+sbcl (sb-c:source-location) #-sbcl nil
+              :name ',name))
+
            (defmethod execute (mode (,command ,class-name) ,universal-argument)
              (declare (ignorable ,universal-argument))
              ,(gen-defcommand-body name
                                    universal-argument
-                                   arg-descriptors)))))))
+                                   arg-descriptors))
+
+           (register-command (make-instance ',class-name)
+                             :mode-name ',mode-name
+                             :command-name ,command-name))))))
 
 #|
-;;; example 1
 (defclass foo-advice () ())
 
 (define-command (foo-1 (:advice-classes foo-advice)) (p) ("p")
@@ -112,22 +133,5 @@
 
 (defmethod execute (mode (command foo-advice) argument)
   ;; :advice-classesをfoo-adviceにしたfoo-1とfoo-2コマンドだけが呼び出される
-  )
-
-;;; example 2
-(defclass bar-primary () ())
-
-(define-command (bar-1 (:primary-class bar-primary)) (p) ("p")
-  ...body)
-
-(define-command (bar-2 (:primary-class bar-primary)) (s) ("sInput: ")
-  ...body)
-
-(defmethod execute (mode (command bar-primary) argument)
-  ;; :primary-classをbar-primaryにしたbar-1,bar-2コマンドだけが呼び出される
-  )
-
-(defmethod execute (mode (command primary-command) argument)
-  ;; :primary-classがbar-primaryのときはこれは呼び出されない
   )
 |#

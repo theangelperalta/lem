@@ -1,28 +1,23 @@
 (defsystem "lem-tests"
   :depends-on ("lem-base"
                "lem"
-               "lem-lsp-utils"
-               "lem-lsp-server"
                "lem-fake-interface"
                "lem-lisp-syntax"
                "lem-lisp-mode"
                "cl-ansi-text"
                "trivial-package-local-nicknames"
-               "testif")
+               "rove")
   :pathname "tests"
   :components ((:file "utilities")
                (:module "common"
                 :components ((:file "ring")
                              (:file "killring")
-                             (:file "history")))
-               (:module "lsp-utils"
-                :components ((:file "json")
-                             (:file "json-lsp-utils")))
-               (:module "lsp-server"
-                :components ((:file "test-server")
-                             (:file "initialize")
-                             (:file "initialized")
-                             (:file "text-document-did-open")))
+                             (:file "history")
+                             (:file "timer")))
+               (:module "language-server"
+                :components ((:file "utils")
+                             (:file "micros-tests")
+                             (:file "tests")))
                (:module "lisp-syntax"
                 :components ((:file "indent-test")
                              (:file "defstruct-to-defclass")))
@@ -40,4 +35,4 @@
                (:file "file")
                (:file "completion"))
   :perform (test-op (o c)
-                    (symbol-call :testif :run-tests)))
+                    (symbol-call :rove :run c)))

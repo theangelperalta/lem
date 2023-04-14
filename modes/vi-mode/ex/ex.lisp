@@ -1,11 +1,11 @@
-(defpackage :lem-vi-mode.ex
+(defpackage :lem-vi-mode/ex
   (:use :cl
         :lem
-        :lem-vi-mode.core
-        :lem-vi-mode.state.ex
-        :lem-vi-mode.ex-parser)
+        :lem-vi-mode/core
+        :lem-vi-mode/state/ex
+        :lem-vi-mode/ex-parser)
   (:export :vi-ex))
-(in-package :lem-vi-mode.ex)
+(in-package :lem-vi-mode/ex)
 
 (define-command vi-ex () ()
   (let ((directory (lem:buffer-directory)))
@@ -24,9 +24,9 @@
                   (mapcar (lambda (filename)
                             (let ((label (tail-of-pathname filename))
                                   (prefix-len (- (length str) (length comp-str))))
-                              (with-point ((s (lem.prompt-window::current-prompt-start-point))
-                                           (e (lem.prompt-window::current-prompt-start-point)))
-                                (lem.completion-mode:make-completion-item
+                              (with-point ((s (lem/prompt-window::current-prompt-start-point))
+                                           (e (lem/prompt-window::current-prompt-start-point)))
+                                (lem/completion-mode:make-completion-item
                                  :label label
                                  :start (character-offset
                                          s
@@ -35,11 +35,11 @@
                                               (uiop:pathname-directory-pathname (subseq str prefix-len))))
                                             prefix-len))
                                  :end (line-end e)))))
-                          (lem.completion-mode::completion-file
+                          (lem/completion-mode::completion-file
                            comp-str
                            directory))))))
         :history-symbol 'vi-ex)))))
 
 (defun execute-ex (string)
-  (let ((lem-vi-mode.ex-core:*point* (current-point)))
+  (let ((lem-vi-mode/ex-core:*point* (current-point)))
     (eval (parse-ex string))))

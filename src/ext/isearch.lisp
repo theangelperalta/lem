@@ -1,6 +1,7 @@
-(defpackage :lem.isearch
+(defpackage :lem/isearch
   (:use :cl :lem)
   (:export :*isearch-keymap*
+           :isearch-mode
            :isearch-highlight-attribute
            :isearch-highlight-active-attribute
            :isearch-forward
@@ -29,7 +30,7 @@
            :query-replace-symbol)
   #+sbcl
   (:lock t))
-(in-package :lem.isearch)
+(in-package :lem/isearch)
 
 (defvar *isearch-keymap* (make-keymap :name '*isearch-keymap*
                                       :undef-hook 'isearch-self-insert))

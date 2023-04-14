@@ -1,51 +1,50 @@
-(defpackage :lem.list-buffers
-  (:use :cl :lem :lem.menu-mode)
-  (:export :list-buffers)
-  #+sbcl
-  (:lock t))
-(in-package :lem.list-buffers)
+(defpackage :lem/list-buffers
+  (:use :cl
+        :lem)
+  (:import-from :lem/multi-column-list
+                :multi-column-list
+                :multi-column-list-of-window
+                :display
+                :quit
+                :update
+                :collect-checked-items
+                :delete-checked-items)
+  (:export :list-buffers))
+(in-package :lem/list-buffers)
 
 (define-key *global-keymap* "C-x C-b" 'list-buffers)
 
-(defun buffer-menu-items ()
-  ;; copy-list is necessary to detect buffer list changes
-  (copy-list (buffer-list)))
+(defun kill-buffers (window)
+  (let ((multi-column-list (multi-column-list-of-window window)))
+    (delete-checked-items multi-column-list)))
 
-(defun buffer-menu-columns (buffer)
-  (list (format nil "~:[-~;%~]~:[-~;%~]"
-                (buffer-modified-p buffer)
-                (buffer-read-only-p buffer))
-        (buffer-name buffer)
-        (buffer-filename buffer)))
-
-(defun buffer-menu-select (menu buffer)
-  (declare (ignore menu))
-  buffer)
-
-(defun buffer-menu-delete (menu buffer)
-  (declare (ignore menu))
-  (kill-buffer buffer)
-  :redraw)
-
-(defun buffer-menu-check-consistency (menu origin-items)
-  (let ((items (buffer-menu-items)))
-    (cond
-      ((set-exclusive-or items origin-items :test 'equal)
-       (update-menu menu items)
-       (message "Buffer list has been changed. Please select again.")
-       nil)
-      (t t))))
+(defun save-buffers (window)
+  (let ((multi-column-list (multi-column-list-of-window window)))
+    (mapc #'save-buffer (collect-checked-items multi-column-list))
+    (update multi-column-list)))
 
 (define-command list-buffers () ()
-  (let ((menu
-         (make-instance 'menu
-                        :columns '("Attributes" "Buffer" "File")
-                        :items (buffer-menu-items)
-                        :column-function #'buffer-menu-columns
-                        :select-callback #'buffer-menu-select
-                        :delete-callback #'buffer-menu-delete
-                        :update-items-function #'buffer-menu-items
-                        :check-consistency-function #'buffer-menu-check-consistency)))
-    (display-menu menu :name "Buffer Menu")
-    ;; update is necessary to add the buffer menu itself
-    (update-menu menu (buffer-menu-items))))
+  (display
+   (make-instance 'multi-column-list
+                  :columns '("" "Buffer" "File")
+                  :column-function (lambda (component buffer)
+                                     (declare (ignore component))
+                                     (list (string-trim " " (buffer-attributes buffer))
+                                           (buffer-name buffer)
+                                           (or (buffer-filename buffer) "")))
+                  :items (buffer-list)
+                  :filter-function #'completion-buffer
+                  :select-callback (lambda (component buffer)
+                                     (quit component)
+                                     (switch-to-buffer buffer))
+                  :delete-callback (lambda (component buffer)
+                                     (declare (ignore component))
+                                     (kill-buffer buffer))
+                  :use-check t
+                  :context-menu (make-instance 'lem/context-menu:context-menu
+                                               :items (list (make-instance 'lem/context-menu:item
+                                                                           :label "Kill selected buffers"
+                                                                           :callback #'kill-buffers)
+                                                            (make-instance 'lem/context-menu:item
+                                                                           :label "Save selected buffers"
+                                                                           :callback #'save-buffers))))))

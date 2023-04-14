@@ -1,5 +1,3 @@
-;;; reimplementation of lem-lsp-server
-
 (require :sb-concurrency)
 
 (defsystem "lem-language-server"
@@ -13,24 +11,28 @@
                "micros"
                "lem"
                "lem-lisp-syntax"
-               "lem-socket-utils")
+               "lem-socket-utils"
+               "lem-lsp-base")
   :serial t
-  :components ((:module "protocol"
-                :components ((:file "yason-utils")
-                             (:file "lsp-type")
-                             (:file "protocol-generator")
-                             (:file "protocol-3-17")
-                             (:file "converter")
-                             (:file "utils")))
-               (:file "micros-client")
+  :components ((:file "micros-client")
                (:file "package")
                (:file "config")
                (:file "editor-utils")
                (:file "method")
                (:file "server")
-               (:file "runtime")
                (:file "text-document")
-               (:module "methods"
+               (:file "eval")
+               (:file "commands")
+               (:module "controller"
                 :components ((:file "lifecycle")
                              (:file "document-synchronization")
-                             (:file "language-features")))))
+                             (:file "language-features")
+                             (:file "workspace")
+                             (:file "window")
+                             (:file "commands")))))
+
+(defsystem "lem-language-server/cli"
+  :depends-on ("lem-language-server"
+               "command-line-arguments")
+  :serial t
+  :components ((:file "cli")))

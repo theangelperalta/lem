@@ -3,12 +3,19 @@
   (:use :cl)
   (:import-from :lem-socket-utils
                 :random-available-port)
-  (:export :remote-eval
+  (:export :*write-string-function*
+           :connection-port
+           :connection-swank-port
+           :new-request-id
+           :remote-eval
            :remote-eval-sync
+           :interrupt
            :start-server-and-connect
            :connect
            :stop-server))
 (in-package :lem-language-server/micros-client)
+
+(defvar *write-string-function* nil)
 
 (define-condition give-up-connection-to-server (error)
   ((hostname :initarg :hostname)
@@ -43,6 +50,9 @@
    (request-id-counter
     :initform 0
     :accessor connection-request-id-counter)
+   (request-id-counter-mutex
+    :initform (sb-thread:make-mutex)
+    :reader connection-request-id-counter-mutex)
    (continuations
     :initform '()
     :accessor connection-continuations)
@@ -59,7 +69,8 @@
     :accessor connection-swank-port)))
 
 (defun new-request-id (connection)
-  (incf (connection-request-id-counter connection)))
+  (sb-thread:with-mutex ((connection-request-id-counter-mutex connection))
+    (incf (connection-request-id-counter connection))))
 
 (defun add-continuation (connection request-id continuation)
   (sb-thread:with-mutex ((connection-continuations-mutex connection))
@@ -82,6 +93,7 @@
 (defun socket-connect (hostname port)
   (let ((socket (usocket:socket-connect hostname port :element-type '(unsigned-byte 8))))
     (setf (sb-bsd-sockets:sockopt-keep-alive (usocket:socket socket)) t)
+    (log:debug "socket connected" hostname port)
     socket))
 
 (defun create-connection (hostname port)
@@ -90,7 +102,6 @@
                                     :socket socket
                                     :hostname hostname
                                     :port port)))
-    (log:debug "socket connected" hostname port)
     connection))
 
 (defun message-waiting-p (connection &key (timeout 0))
@@ -131,16 +142,16 @@
                     expression
                     &key (package-name (connection-package connection))
                          (thread t)
+                         (request-id (new-request-id connection))
                          callback)
   (check-type callback function)
-  (let ((request-id (new-request-id connection)))
-    (add-continuation connection request-id callback)
-    (send-message connection
-                  `(:emacs-rex
-                    ,expression
-                    ,package-name
-                    ,thread
-                    ,request-id))))
+  (add-continuation connection request-id callback)
+  (send-message connection
+                `(:emacs-rex
+                  ,expression
+                  ,package-name
+                  ,thread
+                  ,request-id)))
 
 (defun remote-eval-sync (connection
                          expression
@@ -159,10 +170,43 @@
         ((:abort condition)
          (error 'remote-eval-abort :condition condition))))))
 
+(defun interrupt (connection request-id)
+  (send-message connection `(:interrupt-thread ,request-id)))
+
+(defun setup-repl (connection)
+  (let ((result
+          (remote-eval-sync connection
+                            '(micros/contrib/repl:create-repl nil :coding-system "utf-8-unix")
+                            :package-name "CL-USER")))
+    (destructuring-bind (package-name package-string-for-prompt) result
+      (declare (ignore package-string-for-prompt))
+      (setf (connection-package connection) package-name)))
+  (values))
+
 (defun call-continuation (connection value request-id)
   (let ((continuation (get-and-drop-continuation connection request-id)))
     (when continuation
       (funcall (continuation-function continuation) value))))
+
+(defun micros-write-string (string &key target (info :log))
+  (check-type info (member :log :error))
+  (when *write-string-function*
+    (funcall *write-string-function* string target info)))
+
+(defun dispatch-message (connection message)
+  (log:debug message)
+  (alexandria:destructuring-case message
+    ((:return value request-id)
+     (call-continuation connection value request-id))
+    ((:write-string string &optional target)
+     (micros-write-string string :target target))
+    ((:debug thread level condition restarts frames conts)
+     (declare (ignore level condition restarts frames conts))
+     (remote-eval connection
+                  '(micros:sldb-abort)
+                  :thread thread
+                  :callback (lambda (value)
+                              (declare (ignore value)))))))
 
 (defun dispatch-waiting-messages (connection)
   (loop :while (message-waiting-p connection)
@@ -172,12 +216,6 @@
 (defun dispatch-message-loop (connection)
   (loop
     (dispatch-waiting-messages connection)))
-
-(defun dispatch-message (connection message)
-  (log:debug message)
-  (alexandria:destructuring-case message
-    ((:return value request-id)
-     (call-continuation connection value request-id))))
 
 (defun connect-until-successful (hostname port)
   (loop :for second :in '(0.1 0.2 0.4 0.8 1.6 3.2 6.4)
@@ -212,32 +250,36 @@
       (return))
     (let ((output-string (async-process:process-receive-output process)))
       (when output-string
-        (log:info "process output" output-string)))))
+        (log:debug "process output" output-string)))))
 
 (defun make-dispatch-message-loop-thread (connection)
   (sb-thread:make-thread #'dispatch-message-loop
                          :name "micros/client dispatch-message-loop"
                          :arguments (list connection)))
 
+(defun setup (connection &key server-process swank-port)
+  (let ((thread (make-dispatch-message-loop-thread connection)))
+    (setf (connection-message-dispatcher-thread connection) thread
+          (connection-server-process connection) server-process
+          (connection-swank-port connection) swank-port)
+    (setup-repl connection)
+    connection))
+
 (defun start-server-and-connect (deny-port)
   (let* ((micros-port (random-available-port deny-port))
          (swank-port (random-available-port deny-port micros-port))
          (process (create-server-process micros-port :swank-port swank-port)))
     (log:debug process (async-process::process-pid process))
-    (log:info "swank port: ~D, micros port: ~D" swank-port micros-port)
-    (let* ((connection (connect-until-successful "localhost" micros-port))
-           (thread (make-dispatch-message-loop-thread connection)))
-      (setf (connection-message-dispatcher-thread connection) thread
-            (connection-server-process connection) process
-            (connection-swank-port connection) swank-port)
+    (log:debug "swank port: ~D, micros port: ~D" swank-port micros-port)
+    (let ((connection (connect-until-successful "localhost" micros-port)))
+      (setup connection :server-process process :swank-port swank-port)
       (sb-thread:make-thread (lambda ()
                                (receive-process-output-loop process)))
       connection)))
 
 (defun connect (hostname port)
-  (let* ((connection (create-connection hostname port))
-         (thread (make-dispatch-message-loop-thread connection)))
-    (setf (connection-message-dispatcher-thread connection) thread)
+  (let ((connection (connect-until-successful hostname port)))
+    (setup connection)
     connection))
 
 (defun stop-server (connection)

@@ -1,5 +1,5 @@
 (defpackage :lem-json-mode
-  (:use :cl :lem :lem.language-mode :lem.language-mode-tools)
+  (:use :cl :lem :lem/language-mode :lem/language-mode-tools)
   (:export :*json-mode-hook*
            :json-mode))
 (in-package :lem-json-mode)
@@ -42,7 +42,7 @@
     table))
 
 (define-major-mode json-mode language-mode
-    (:name "js"
+    (:name "json"
      :keymap *json-mode-keymap*
      :syntax-table *json-syntax-table*
      :mode-hook *json-mode-hook*)

@@ -10,18 +10,23 @@
                "yason"
                "log4cl"
                "split-sequence"
+               "dexador"
                "lem-base"
-               "lem-encodings")
+               "lem-encodings"
+               "sb-concurrency")
   :pathname "src"
   :serial t
   :components ((:module "common"
                 :components ((:file "ring")
                              (:file "killring")
-                             (:file "history")))
+                             (:file "history")
+                             (:file "timer")
+                             (:file "command")))
                (:file "package")
                (:file "quicklisp-utils")
                (:file "config")
                (:file "errors")
+               (:file "system")
                (:file "signal-handler")
                (:file "key")
                (:file "macros")
@@ -38,12 +43,10 @@
                (:file "window")
                (:file "popup")
                (:file "modeline")
-               (:file "command-table")
                (:file "command")
                (:file "defcommand")
                (:file "mode")
                (:file "keymap")
-               (:file "timer")
                (:file "event-queue")
                (:file "interp")
                (:file "input")
@@ -75,6 +78,11 @@
                (:module "ext"
                 :serial t
                 :components ((:file "popup-window")
+                             (:file "popup-message")
+                             (:file "popup-menu")
+                             (:file "multi-column-list")
+                             (:file "context-menu")
+                             (:file "list-buffers")
                              (:file "completion-mode")
                              (:file "prompt-window")
                              (:file "tmlanguage")
@@ -85,10 +93,8 @@
                              (:file "kbdmacro")
                              (:file "isearch")
                              (:file "showparen")
-                             (:file "menu-mode")
-                             (:file "list-buffers")
                              (:file "line-numbers")
-                             (:file "sourcelist")
+                             (:file "peek-source")
                              (:file "grep")
                              (:file "go-back")
                              (:file "language-mode")
@@ -99,7 +105,8 @@
                              (:file "rectangle")
                              (:file "auto-save")
                              (:file "tabbar")
-                             (:file "frame-multiplexer")))))
+                             (:file "frame-multiplexer")
+                             (:file "deepl")))))
 
 (defsystem "lem/extensions"
   :depends-on ("lem-lsp-mode"

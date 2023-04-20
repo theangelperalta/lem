@@ -80,9 +80,9 @@
 ;; Operators keys = ['D'];
 (define-key *command-keymap* "D" 'vi-delete-line)
 ;; Operators keys = ['c']; change
-(define-key *command-keymap* "c" 'vi-clear)
+(define-key *command-keymap* "c" 'vi-change)
 ;; Operators keys = ['C']; ChangeToLineEnd
-(define-key *command-keymap* "C" 'vi-clear-line)
+(define-key *command-keymap* "C" 'vi-change-line)
 ;; Operator keys = ['y'];
 (define-key *command-keymap* "y" 'vi-yank)
 ;; Operator keys = ['='];

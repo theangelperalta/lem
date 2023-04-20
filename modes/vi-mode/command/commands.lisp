@@ -34,8 +34,8 @@
            :vi-delete-previous-char
            :vi-delete
            :vi-delete-line
-           :vi-clear
-           :vi-clear-line
+           :vi-change
+           :vi-change-line
            :vi-join
            :vi-join-line
            :vi-yank
@@ -76,7 +76,7 @@
 (in-package :lem-vi-mode/commands)
 
 (defvar *cursor-offset* -1)
-(defvar *vi-clear-recursive* nil)
+(defvar *vi-change-recursive* nil)
 (defvar *vi-delete-recursive* nil)
 (defvar *vi-yank-recursive* nil)
 
@@ -238,7 +238,7 @@
                                             (vi-space-char-p char))))
   (%vi-forward-word-begin n)
   (unless (or *vi-delete-recursive*
-              *vi-clear-recursive*)
+              *vi-change-recursive*)
     (vi-backward-char)))
 
 (define-command vi-forward-word-end-broad (&optional (n 1)) ("p")
@@ -290,7 +290,7 @@
 
 (defvar *vi-indent-recursive* nil)
 (let ((tag (gensym)))
-  (define-command vi-indent (&optional (n 1)) ("p")
+  (define-vi-operator vi-indent (&optional (n 1)) ("p")
     (cond (*vi-indent-recursive*
            (indent-line (current-point))
            (throw tag t))
@@ -329,7 +329,7 @@
     (delete-previous-char n)))
 
 (let ((tag (gensym)))
-  (define-command vi-delete (&optional (n 1)) ("p")
+  (define-vi-operator vi-delete (&optional (n 1)) ("p")
     (cond (*vi-delete-recursive*
            ;; TODO: universal argument
            (with-point ((start (line-start (current-point)))
@@ -339,9 +339,9 @@
                  (kill-region start end))
                (if eob
                    (unless (or (first-line-p (current-point))
-                               *vi-clear-recursive*)
+                               *vi-change-recursive*)
                      (delete-previous-char))
-                   (when *vi-clear-recursive*
+                   (when *vi-change-recursive*
                      (insert-character (current-point) #\Newline)
                      (vi-previous-line)))))
            (throw tag t))
@@ -384,10 +384,10 @@
                              (character-offset end 1))
                            (with-killring-context (:options (when multiline :vi-line))
                              (kill-region start end))))))))
-               (unless *vi-clear-recursive*
+               (unless *vi-change-recursive*
                  (fall-within-line (current-point)))))))))
 
-(define-command vi-delete-line () ()
+(define-vi-operator vi-delete-line () ()
   (cond ((visual-block-p)
          (apply-visual-range (lambda (start end)
                                (kill-region start (line-end end)))))
@@ -398,16 +398,16 @@
          (with-point ((start (current-point))
                       (end (current-point)))
            (kill-region start (line-end end)))
-         (unless *vi-clear-recursive*
+         (unless *vi-change-recursive*
            (fall-within-line (current-point))))))
 
-(define-command vi-clear () ()
-  (let ((*vi-clear-recursive* t))
+(define-vi-operator vi-change () ()
+  (let ((*vi-change-recursive* t))
     (vi-delete))
   (vi-insert))
 
-(define-command vi-clear-line () ()
-  (let ((*vi-clear-recursive* t))
+(define-vi-operator vi-change-line () ()
+  (let ((*vi-change-recursive* t))
     (vi-delete-line))
   (vi-insert))
 

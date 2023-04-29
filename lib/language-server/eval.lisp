@@ -37,9 +37,9 @@
 (defun convert-eval-result (value)
   (alexandria:destructuring-ecase value
     ((:ok result)
-     (let ((value (or (micros/lsp-api:eval-result-error result)
-                      (micros/lsp-api:eval-result-value result)))
-           (errorp (not (null (micros/lsp-api:eval-result-error
+     (let ((value (or (micros/lsp-api::eval-result-error result)
+                      (micros/lsp-api::eval-result-value result)))
+           (errorp (not (null (micros/lsp-api::eval-result-error
                                result)))))
        (values value
                (if errorp
@@ -63,7 +63,7 @@
 (defun remote-eval (string package-name &key callback request-id)
   (micros/client:remote-eval
    (server-backend-connection *server*)
-   `(micros/lsp-api:eval-for-language-server ,string)
+   `(micros/lsp-api::eval-for-language-server ,string)
    :package-name package-name
    :callback (lambda (value)
                (with-error-handler ()

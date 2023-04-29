@@ -1,14 +1,14 @@
-(defpackage :lem-vi-mode.binds
+(defpackage :lem-vi-mode/binds
   (:use :cl
         :lem
         :lem/universal-argument
         :lem/abbrev
-        :lem-vi-mode.core
-        :lem-vi-mode.commands
-        :lem-vi-mode.ex
-        :lem-vi-mode.state.visual
-        :lem-vi-mode.state.insert))
-(in-package :lem-vi-mode.binds)
+        :lem-vi-mode/core
+        :lem-vi-mode/commands
+        :lem-vi-mode/ex
+        :lem-vi-mode/state/visual
+        :lem-vi-mode/state/insert))
+(in-package :lem-vi-mode/binds)
 
 ;; Commands
 

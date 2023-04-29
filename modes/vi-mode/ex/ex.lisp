@@ -1,11 +1,11 @@
-(defpackage :lem-vi-mode.ex
+(defpackage :lem-vi-mode/ex
   (:use :cl
         :lem
-        :lem-vi-mode.core
-        :lem-vi-mode.state.ex
-        :lem-vi-mode.ex-parser)
+        :lem-vi-mode/core
+        :lem-vi-mode/state/ex
+        :lem-vi-mode/ex-parser)
   (:export :vi-ex))
-(in-package :lem-vi-mode.ex)
+(in-package :lem-vi-mode/ex)
 
 (define-command vi-ex () ()
   (let ((directory (lem:buffer-directory)))
@@ -41,5 +41,5 @@
         :history-symbol 'vi-ex)))))
 
 (defun execute-ex (string)
-  (let ((lem-vi-mode.ex-core:*point* (current-point)))
+  (let ((lem-vi-mode/ex-core:*point* (current-point)))
     (eval (parse-ex string))))

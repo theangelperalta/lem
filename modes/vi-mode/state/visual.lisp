@@ -1,7 +1,7 @@
-(defpackage :lem-vi-mode.visual
+(defpackage :lem-vi-mode/state/visual
   (:use :cl
         :lem
-        :lem-vi-mode.core)
+        :lem-vi-mode/core)
   (:export :vi-visual-end
            :vi-visual-char
            :vi-visual-line
@@ -15,7 +15,7 @@
            :vi-visual-append
            :vi-visual-upcase
            :vi-visual-downcase))
-(in-package :lem-vi-mode.visual)
+(in-package :lem-vi-mode/state/visual)
 
 (defvar *set-visual-function* nil)
 (defvar *start-point* nil)
@@ -29,14 +29,15 @@
 (define-key *visual-keymap* "U" 'vi-visual-upcase)
 (define-key *visual-keymap* "u" 'vi-visual-downcase)
 
-(define-vi-state visual (:keymap *visual-keymap*
-                         :post-command-hook 'post-command-hook)
-  (:disable ()
+(define-vi-state visual (:keymap *visual-keymap*))
+
+(defmethod e-hook ((state visual) &rest args)
+   (setf *set-visual-function* (caar args))
+   (setf *start-point* (copy-point (current-point))))
+
+(defmethod d-hook ((state visual))
    (delete-point *start-point*)
    (clear-visual-overlays))
-  (:enable (function)
-   (setf *set-visual-function* function)
-   (setf *start-point* (copy-point (current-point)))))
 
 (defun disable ()
   (clear-visual-overlays))
@@ -45,7 +46,7 @@
   (mapc 'delete-overlay *visual-overlays*)
   (setf *visual-overlays* '()))
 
-(defun post-command-hook ()
+(defmethod post-command-hook ((state visual))
   (clear-visual-overlays)
   (if (not (eq (current-buffer) (point-buffer *start-point*)))
       (vi-visual-end)
@@ -88,7 +89,7 @@
 
 (define-command vi-visual-end () ()
   (clear-visual-overlays)
-  (change-state 'command))
+  (change-state 'normal))
 
 (define-command vi-visual-char () ()
   (if (visual-char-p)

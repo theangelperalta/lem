@@ -1,20 +1,24 @@
-(defpackage :lem-vi-mode.core
+(defpackage :lem-vi-mode/core
   (:use :cl
         :lem
         :lem/universal-argument)
+  (:import-from :cl-package-locks)
   (:export :*enable-hook*
            :*disable-hook*
            :vi-mode
            :define-vi-state
+           :define-vi-operator
            :current-state
            :change-state
            :with-state
            :*command-keymap*
            :*insert-keymap*
            :*inactive-keymap*
-           :command
-           :insert))
-(in-package :lem-vi-mode.core)
+           :post-command-hook
+           :e-hook
+           :d-hook
+           :normal))
+(in-package :lem-vi-mode/core)
 
 (defvar *default-cursor-color* nil)
 
@@ -54,27 +58,94 @@
 (defun change-element-name (name)
   (setf (element-name *modeline-element*) name))
 
-
-(defstruct vi-state
-  name
-  keymap
-  post-command-hook
-  enable-hook
-  disable-hook
-  cursor-color)
+;; Add tag
+;; Add message
+;; Add cursor
+;; Add enable
+;; 
+(defclass vi-state ()
+  ((tag
+  :initarg :tag
+  :reader tag)
+  (message
+  :initarg :message
+  :reader msg)
+  (cursor-type 
+  :initarg :cursor-type
+  :reader cursor-type)
+  (keymap
+  :initarg :keymap
+  :reader kmap)
+  (cursor-color
+  :initarg :cursor-color
+  :accessor cursor-color)))
 
 (defvar *current-state* nil)
 
-(defmacro define-vi-state (name (&key keymap post-command-hook cursor-color) &body spec)
-  (let ((enable-form (rest (assoc :enable spec)))
-        (disable-form (rest (assoc :disable spec))))
-    `(setf (get ',name 'state)
-           (make-vi-state :name ',name
+(defmacro %define-vi-action (&whole form vi-action name-and-options params (&rest arg-descriptors) &body body)
+  (destructuring-bind (name . options) (uiop:ensure-list name-and-options)
+    (let ((advice-classes (alexandria:assoc-value options :advice-classes))
+          (class-name (alexandria:if-let (elt (assoc :class options))
+                        (second elt)
+                        name))
+          (command-name (alexandria:if-let (elt (assoc :name options))
+                          (second elt)
+                          (string-downcase name))))
+                          `(define-command (,class-name (:advice-classes vi-action ,@advice-classes)) ,params ,arg-descriptors
+                           ,@body))))
+
+(defclass vi-action () ())
+
+(defmacro define-vi-action (&whole form name-and-options params (&rest arg-descriptors) &body body)
+  `(%define-vi-action vi-action ,name-and-options ,params ,arg-descriptors ,@body))
+
+(defmethod execute :before (mode (command vi-action) argument)
+  (message "Hello World"))
+
+(defclass vi-operator (vi-action) ())
+
+(defmacro define-vi-operator (&whole form name-and-options params (&rest arg-descriptors) &body body)
+  `(%define-vi-action vi-operator ,name-and-options ,params ,arg-descriptors ,@body))
+;; A command is something like <Esc>, :, v, i, etc.
+(defclass vi-command (vi-action) ())
+
+(defmacro define-vi-command (&whole form name-and-options params (&rest arg-descriptors) &body body)
+  `(%define-vi-action vi-command ,name-and-options ,params ,arg-descriptors ,@body))
+;;;;;;;;;;;;;;;;;;;;;;;
+(defclass vi-motion (vi-command) ())
+
+(defmacro define-vi-motion (&whole form name-and-options params (&rest arg-descriptors) &body body)
+  `(%define-vi-action vi-motion ,name-and-options ,params ,arg-descriptors ,@body))
+
+(defclass vi-text-object (vi-motion) ())
+
+(defmacro define-vi-text-object (&whole form name-and-options params (&rest arg-descriptors) &body body)
+  `(%define-vi-action vi-text-object ,name-and-options ,params ,arg-descriptors ,@body))
+
+;;; vi-state methods
+(defmacro define-vi-state (name (&key tag message cursor-type keymap cursor-color) &body spec)
+    `(progn
+      (cl-package-locks:without-package-locks
+       (defclass ,name (vi-state) ()))
+      (setf (get ',name 'state)
+           (make-instance ',name
+                          :tag ,tag
+                          :message ,message
+                          :cursor-type ,cursor-type
                           :keymap ,keymap
-                          :post-command-hook ,post-command-hook
-                          :enable-hook ,(if enable-form `(lambda ,@enable-form))
-                          :disable-hook ,(if disable-form `(lambda ,@disable-form))
                           :cursor-color ,cursor-color))))
+
+(defgeneric post-command-hook (state))
+
+(defmethod post-command-hook ((state vi-state)))
+
+(defgeneric e-hook (state &rest args))
+
+(defmethod e-hook ((state vi-state) &rest args))
+
+(defgeneric d-hook (state))
+
+(defmethod d-hook ((state vi-state)))
 
 (defun current-state ()
   *current-state*)
@@ -84,23 +155,21 @@
         (if (symbolp state)
             (get state 'state)
             state))
-  (assert (vi-state-p state))
+  (assert (or (subtypep (type-of state) 'vi-state) (typep 'vi-state (type-of state))))
   state)
 
 (defun change-state (name &rest args)
-  (alexandria:when-let ((disable-hook (and *current-state*
-                                           (vi-state-disable-hook (ensure-state *current-state*)))))
-    (funcall disable-hook))
+  (and *current-state*
+      (d-hook (ensure-state *current-state*))) 
   (let ((state (ensure-state name)))
     (setf *current-state* name)
-    (change-global-mode-keymap 'vi-mode (vi-state-keymap state))
+    (change-global-mode-keymap 'vi-mode (kmap state))
     (change-element-name (format nil "[~A]" name))
-    (when (vi-state-enable-hook state)
-      (apply (vi-state-enable-hook state) args))
+    (e-hook state args)
     (unless *default-cursor-color*
       (setf *default-cursor-color*
             (attribute-background (ensure-attribute 'cursor nil))))
-    (set-attribute 'cursor :background (or (vi-state-cursor-color state) *default-cursor-color*))))
+    (set-attribute 'cursor :background (or (cursor-color state) *default-cursor-color*))))
 
 (defmacro with-state (state &body body)
   (alexandria:with-gensyms (old-state)
@@ -112,23 +181,15 @@
 
 (defvar *command-keymap* (make-keymap :name '*command-keymap*
                                       :parent *global-keymap*))
-(defvar *insert-keymap* (make-keymap :name '*insert-keymap* :parent *global-keymap*))
 (defvar *inactive-keymap* (make-keymap :parent *global-keymap*))
-
-(define-vi-state command (:keymap *command-keymap*))
-
-(define-vi-state insert (:keymap *insert-keymap* :cursor-color "IndianRed")
-  (:enable () (message " -- INSERT --")))
 
 (define-vi-state modeline (:keymap *inactive-keymap*))
 
 (defun prompt-activate-hook () (change-state 'modeline))
-(defun prompt-deactivate-hook () (change-state 'command))
+(defun prompt-deactivate-hook () (change-state 'normal))
 
 (defun vi-post-command-hook ()
-  (alexandria:when-let ((it (vi-state-post-command-hook
-                             (ensure-state (current-state)))))
-    (funcall it)))
+  (post-command-hook (ensure-state (current-state))))
 
 (define-condition post-command-hook (after-executing-command) ())
 (defmethod handle-signal ((condition post-command-hook))
@@ -138,7 +199,7 @@
 (add-hook *enable-hook*
           (lambda ()
             (initialize-vi-modeline)
-            (change-state 'command)
+            (change-state 'normal)
             (add-hook *prompt-activate-hook* 'prompt-activate-hook)
             (add-hook *prompt-deactivate-hook* 'prompt-deactivate-hook)))
 

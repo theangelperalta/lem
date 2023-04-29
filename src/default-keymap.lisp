@@ -110,6 +110,7 @@
 (define-key *global-keymap* "C-M-d" 'down-list)
 (define-key *global-keymap* "C-M-u" 'backward-up-list)
 (define-key *global-keymap* "C-M-@" 'mark-sexp)
+(define-key *global-keymap* "C-M-Space" 'mark-sexp)
 (define-key *global-keymap* "C-M-k" 'kill-sexp)
 (define-key *global-keymap* "C-M-t" 'transpose-sexps)
 (define-key *global-keymap* "C-M-y" 'kill-around-form)
@@ -120,3 +121,5 @@
 (define-key *global-keymap* "M-C" 'add-cursors-to-next-line)
 
 (define-key *global-keymap* "Shift-F10" 'show-context-menu)
+(define-key *global-keymap* "C-+" 'font-size-increase)
+(define-key *global-keymap* "C--" 'font-size-decrease)

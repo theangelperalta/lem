@@ -172,10 +172,10 @@
   (:dark :foreground nil :background "blue"))
 
 (define-attribute modeline
-  (t :background "#bbbbbb" :foreground "black"))
+  (t :bold-p t :background "#404040" :foreground "white"))
 
 (define-attribute modeline-inactive
-  (t :background "#bbbbbb" :foreground "#777777"))
+  (t :bold-p t :background "#212121" :foreground "#707070"))
 
 (define-attribute truncate-attribute)
 
@@ -214,4 +214,4 @@
   (:dark :foreground "PaleGreen"))
 
 (define-attribute syntax-builtin-attribute
-  (t :foreground "#D030F0"))
+  (t :foreground "#FF87FF"))

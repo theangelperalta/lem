@@ -21,7 +21,7 @@
 (defvar *last-compilation-result* nil)
 
 (define-major-mode lisp-mode language-mode
-    (:name "lisp"
+    (:name "Lisp"
      :description "Contains necessary functions to handle lisp code."
      :keymap *lisp-mode-keymap*
      :syntax-table lem-lisp-syntax:*syntax-table*
@@ -69,7 +69,7 @@
 (define-key *lisp-mode-keymap* "C-c C-q" 'lisp-quickload)
 
 (defmethod convert-modeline-element ((element (eql 'lisp-mode)) window)
-  (format nil " [~A~A]" (buffer-package (window-buffer window) "CL-USER")
+  (format nil "  ~A~A" (buffer-package (window-buffer window) "CL-USER")
           (if *connection*
               (format nil " ~A:~A"
                       (connection-implementation-name *connection*)

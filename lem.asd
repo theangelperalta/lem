@@ -37,6 +37,7 @@
                (:file "file")
                (:file "screen")
                (:file "frame")
+               (:file "mouse")
                (:file "echo")
                (:file "prompt")
                (:file "window-tree")
@@ -73,6 +74,7 @@
                (:file "display")
 
                (:file "color-theme")
+
                (:file "site-init")
 
                (:module "ext"
@@ -106,7 +108,8 @@
                              (:file "auto-save")
                              (:file "tabbar")
                              (:file "frame-multiplexer")
-                             (:file "deepl")))))
+                             (:file "deepl")
+                             (:file "themes")))))
 
 (defsystem "lem/extensions"
   :depends-on ("lem-lsp-mode"
@@ -139,7 +142,8 @@
                "lem-asm-mode"
                "lem-makefile-mode"
                "lem-shell-mode"
-               "lem-sql-mode"))
+               "lem-sql-mode"
+               "lem-base16-themes"))
 
 (defsystem "lem/executable"
   :build-operation program-op

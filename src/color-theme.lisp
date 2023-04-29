@@ -1,5 +1,15 @@
 (in-package :lem)
 
+(defvar *current-theme*)
+
+(defun current-theme ()
+  *current-theme*)
+
+(defun (setf current-theme) (theme)
+  (setf *current-theme* theme))
+
+(defvar *hot-reload-color-theme* nil)
+
 (defstruct color-theme
   specs
   parent)
@@ -25,7 +35,9 @@
                                      `(list ',(car spec)
                                             ,@(cdr spec)))
                                    specs))
-            :parent ,parent))))
+            :parent ,parent))
+     (when *hot-reload-color-theme*
+       (load-theme ,name))))
 
 (defun inherit-load-theme (theme spec-table)
   (when (color-theme-parent theme)
@@ -67,41 +79,55 @@
       (editor-error "undefined color theme: ~A" name))
     (apply-theme theme)
     (message nil)
-    (redraw-display t)))
+    (redraw-display t)
+    (setf (current-theme) name)
+    (setf (config :color-theme) (current-theme))))
 
+(defun background-color ()
+  (second (assoc :background (color-theme-specs (find-color-theme *current-theme*)))))
+
+(defun foreground-color ()
+  (second (assoc :foreground (color-theme-specs (find-color-theme *current-theme*)))))
+
+(define-major-mode color-theme-selector-mode ()
+    (:name "Themes"
+     :keymap *color-theme-selector-keymap*))
+
+(define-key *color-theme-selector-keymap* "Return" 'color-theme-selector-select)
+
+(define-command color-theme-selector-select () ()
+  (with-point ((point (current-point)))
+    (line-start point)
+    (let ((theme (text-property-at point 'theme)))
+      (load-theme theme))))
+
+(define-command list-color-themes () ()
+  (let* ((buffer (make-buffer "*Color Themes*"))
+         (point (buffer-point buffer))
+         (dark-themes '())
+         (light-themes '()))
+    (with-buffer-read-only buffer nil
+      (erase-buffer buffer)
+      (dolist (name (all-color-themes))
+        (let ((theme (find-color-theme name)))
+          (if (eq :dark (second (assoc :display-background-mode (color-theme-specs theme))))
+              (push (cons name theme) dark-themes)
+              (push (cons name theme) light-themes))))
+      (loop :for (name . theme) :in (append dark-themes light-themes)
+            :do (insert-string
+                 point name
+                 :attribute (make-attribute
+                             :foreground (second (assoc :foreground (color-theme-specs theme)))
+                             :background (second (assoc :background (color-theme-specs theme))))
+                 'theme name)
+                (insert-character point #\newline)))
+    (buffer-start point)
+    (setf (buffer-read-only-p buffer) t)
+    (switch-to-buffer buffer)
+    (change-buffer-mode buffer 'color-theme-selector-mode)))
+
+
 (defun initialize-color-theme ()
-  (load-theme (config :color-theme "emacs-dark")))
+  (load-theme (config :color-theme "decaf")))
 
 (add-hook *before-init-hook* 'initialize-color-theme)
-
-(define-color-theme "emacs-light" ()
-  (:display-background-mode :light)
-  ;; (:foreground "#000000")
-  ;; (:background "#FFFFFF")
-  (:inactive-window-background "light gray")
-  (region :foreground nil :background "#eedc82")
-  (modeline :background "#404040" :foreground "white")
-  (modeline-inactive :background "#303030" :foreground "gray")
-  (syntax-string-attribute :foreground "RosyBrown")
-  (syntax-comment-attribute :foreground "firebrick")
-  (syntax-keyword-attribute :foreground "purple")
-  (syntax-constant-attribute :foreground "#ff00ff")
-  (syntax-function-name-attribute :foreground "blue")
-  (syntax-variable-attribute :foreground "darkgoldenrod")
-  (syntax-type-attribute :foreground "forestgreen"))
-
-(define-color-theme "emacs-dark" ("emacs-light")
-  (:display-background-mode :dark)
-  ;; (:foreground "#FFFFFF")
-  ;; (:background "#000000")
-  (:inactive-window-background nil)
-  (region :foreground nil :background "blue")
-  (modeline :background "CornflowerBlue" :foreground "white")
-  (modeline-inactive :background "#303030" :foreground "gray")
-  (syntax-string-attribute :foreground "light salmon")
-  (syntax-comment-attribute :foreground "chocolate1")
-  (syntax-keyword-attribute :foreground "cyan1")
-  (syntax-constant-attribute :foreground "LightSteelBlue")
-  (syntax-function-name-attribute :foreground "LightSkyBlue")
-  (syntax-variable-attribute :foreground "LightGoldenrod")
-  (syntax-type-attribute :foreground "PaleGreen"))

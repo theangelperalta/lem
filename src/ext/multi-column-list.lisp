@@ -149,7 +149,7 @@
 (defmethod map-columns :around ((component multi-column-list) item)
   (append (if (multi-column-list-use-check-p component)
               (list (if (multi-column-list-item-checked-p item)
-                        "✔ "
+                        "x "
                         "  "))
               nil)
           (mapcar #'princ-to-string (call-next-method))))
@@ -163,8 +163,9 @@
     (funcall (multi-column-list-delete-callback component) component item)))
 
 (defmethod map-columns ((component multi-column-list) item)
-  (when (multi-column-list-column-function component)
-    (funcall (multi-column-list-column-function component) component item)))
+  (if (multi-column-list-column-function component)
+      (funcall (multi-column-list-column-function component) component item)
+      (list (princ-to-string item))))
 
 (defmethod multi-column-list-columns :around ((multi-column-list multi-column-list))
   (append (if (multi-column-list-use-check-p multi-column-list)
@@ -243,16 +244,20 @@
                      :multi-column-list component
                      :column-width-list (compute-column-width-list component))))
     (setf (multi-column-list-print-spec component) print-spec)
-    (let ((popup-menu
-            (display-popup-menu (multi-column-list-items component)
-                                :print-spec print-spec
-                                :action-callback (lambda (item)
-                                                   (select-item component item))
-                                :style style
-                                :max-display-items 100)))
+    (let* ((popup-menu
+             (display-popup-menu (multi-column-list-items component)
+                                 :print-spec print-spec
+                                 :action-callback (lambda (item)
+                                                    (select-item component item))
+                                 :style style
+                                 :max-display-items 100))
+           (window (lem/popup-menu::popup-menu-window popup-menu)))
+      (add-hook (window-leave-hook window)
+                (lambda (old-window)
+                  (declare (ignore old-window))
+                  (multi-column-list/quit)))
       (setf (multi-column-list-popup-menu component) popup-menu)
-      (setf (current-window)
-            (lem/popup-menu::popup-menu-window popup-menu))
+      (setf (current-window) window)
       (setf (lem::buffer-context-menu (window-buffer (current-window)))
             (multi-column-list-context-menu component))
       (setf (multi-column-list-of-window (current-window)) component)

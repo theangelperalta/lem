@@ -55,6 +55,8 @@
 (defgeneric lem-if:clear-eob (implementation view x y))
 (defgeneric lem-if:redraw-view-after (implementation view)
   (:method (implementation view)))
+(defgeneric lem-if::will-update-display (implementation)
+  (:method (implementation)))
 (defgeneric lem-if:update-display (implementation))
 (defgeneric lem-if:scroll (implementation view n))
 
@@ -89,6 +91,11 @@
   (:method (implementation)))
 (defgeneric lem-if:clipboard-copy (implementation text)
   (:method (implementation text)))
+
+(defgeneric lem-if:increase-font-size (implementation)
+  (:method (implementation)))
+(defgeneric lem-if:decrease-font-size (implementation)
+  (:method (implementation)))
 
 (defvar *display-background-mode* nil)
 

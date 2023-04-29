@@ -75,6 +75,9 @@
     :initform nil
     :initarg :cursor-invisible
     :accessor window-cursor-invisible-p)
+   (last-mouse-button-down-point
+    :initform nil
+    :accessor window-last-mouse-button-down-point)
    (parameters
     :initform nil
     :accessor window-parameters)))
@@ -171,6 +174,11 @@
       (move-point (buffer-point buffer)
                   (%window-point new-window)))
     (setf (frame-current-window frame) new-window)))
+
+(defun switch-to-window (new-window)
+  (unless (eq (current-window) new-window)
+    (run-hooks (window-leave-hook (current-window)) (current-window)))
+  (setf (current-window) new-window))
 
 (defun window-list (&optional (frame (current-frame)))
   (window-tree-flatten (frame-window-tree frame)))
@@ -1221,12 +1229,14 @@ window width is changed, we must recalc the window view point."
                (dolist (window (frame-floating-windows (current-frame)))
                  (window-redraw window (redraw-after-modifying-floating-window (implementation)))))
              (redraw-all-windows ()
+               (lem-if:will-update-display (implementation))
                (redraw-header-windows force)
                (redraw-window-list
-                (or (frame-require-redisplay-windows (current-frame))
-                    (and (redraw-after-modifying-floating-window (implementation))
-                         ;; floating-windowが変更されたら、その下のウィンドウは再描画する必要がある
-                         (frame-modified-floating-windows (current-frame)))
+                (if (redraw-after-modifying-floating-window (implementation))
+                    (or (frame-require-redisplay-windows (current-frame))
+                        ;; floating-windowが変更されたら、その下のウィンドウは再描画する必要がある
+                        (frame-modified-floating-windows (current-frame))
+                        force)
                     force))
                (redraw-floating-windows)
                (lem-if:update-display (implementation))))

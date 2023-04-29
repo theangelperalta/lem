@@ -118,6 +118,9 @@
    :setup-frame
    :teardown-frame
    :teardown-frames)
+  ;; mouse.lisp
+  (:export
+   :mouse-button-down-functions)
   ;; echo.lisp
   (:export
    :show-message
@@ -151,6 +154,7 @@
    :*window-show-buffer-functions*
    :window-parent
    :window-view-point
+   :window
    :windowp
    :window-id
    :window-x
@@ -530,6 +534,7 @@
    :clear-eol
    :clear-eob
    :redraw-view-after
+   :will-update-display
    :update-display
    :scroll
    :set-first-view
@@ -547,7 +552,9 @@
    :delete-popup-message
    :display-context-menu
    :clipboard-paste
-   :clipboard-copy))
+   :clipboard-copy
+   :increase-font-size
+   :decrease-font-size))
 
 (defpackage :lem-user
   (:use :cl :lem))

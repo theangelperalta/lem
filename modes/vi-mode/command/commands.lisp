@@ -112,11 +112,27 @@
 
 ;; Vim word
 ;; See http://vimdoc.sourceforge.net/htmldoc/motion.html#word
-;; word = a sequence of letters, digits and underscores
+;; word = a sequence of letters, digits, underscores, or a 
+;; sequence of other non-blank characters.
 (defun vi-word-char-p (char)
   (and (characterp char)
        (or (alphanumericp char)
-           (char= char #\_))))
+           (char= char #\_)
+           ;; TODO: Add mechanism to modify
+           ;; these based on isKeyword
+           ;; which is modified based on file extension.
+           (char= char #\*)
+           (char= char #\/)
+           (char= char #\%)
+           (char= char #\<)
+           (char= char #\=)
+           (char= char #\>)
+           (char= char #\:)
+           (char= char #\$)
+           (char= char #\?)
+           (char= char #\!)
+           (char= char #\^)
+           (char= char #\-))))
 
 (defun vi-space-char-p (char)
   (and (characterp char)

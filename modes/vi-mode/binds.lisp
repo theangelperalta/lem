@@ -12,22 +12,14 @@
 
 ;; Commands
 
-(define-key *command-keymap* "s" 'vi-substitute)
-;; Command/Action keys = ['x'];
-(define-key *command-keymap* "x" 'vi-delete-next-char)
-;; Command/Action keys = ['X'];
-(define-key *command-keymap* "X" 'vi-delete-previous-char)
 ;; Actions keys = ['g', 'J'];
 (define-key *command-keymap* "g J" 'vi-join)
 ;; Actions keys = ['J'];
 (define-key *command-keymap* "J" 'vi-join-line)
-
 ;; Put/Command keys = ['p'];
 (define-key *command-keymap* "p" 'vi-paste-after)
 ;; Put/Command keys = ['P']; PutBeforeCommand
 (define-key *command-keymap* "P" 'vi-paste-before)
-;; Command keys = ['r']; ActionReplaceCharacter
-(define-key *command-keymap* "r" 'vi-replace-char)
 ;; Command keys = ['u']; CommandUndo
 (define-key *command-keymap* "u" 'vi-undo)
 (define-key *command-keymap* "C-r" 'vi-redo)
@@ -74,7 +66,14 @@
 (define-key *inactive-keymap* "Escape" 'vi-keyboard-quit)
 
 ;; Operator
-
+;; Command keys = ['r']; ActionReplaceCharacter
+(define-key *command-keymap* "r" 'vi-replace-char)
+;; Operators keys = ['s'];
+(define-key *command-keymap* "s" 'vi-substitute)
+;; Operators keys = ['x'];
+(define-key *command-keymap* "x" 'vi-delete-next-char)
+;; Operators keys = ['X'];
+(define-key *command-keymap* "X" 'vi-delete-previous-char)
 ;; Operators keys = ['d'];
 (define-key *command-keymap* "d" 'vi-delete)
 ;; Operators keys = ['D'];

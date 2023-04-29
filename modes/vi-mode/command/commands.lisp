@@ -327,11 +327,11 @@
                        (rotatef start end))
                      (indent-points start end))))))))))
 
-(define-command vi-substitute (&optional (n 1)) ("p")
+(define-vi-operator vi-substitute (&optional (n 1)) ("p")
   (vi-delete-next-char n)
   (change-state 'insert))
 
-(define-command vi-delete-next-char (&optional (n 1)) ("p")
+(define-vi-operator vi-delete-next-char (&optional (n 1)) ("p")
   (cond
     ((visual-p)
      (vi-delete))
@@ -340,7 +340,7 @@
        (delete-next-char n)
        (fall-within-line (current-point))))))
 
-(define-command vi-delete-previous-char (&optional (n 1)) ("p")
+(define-vi-operator vi-delete-previous-char (&optional (n 1)) ("p")
   (unless (bolp (current-point))
     (delete-previous-char n)))
 
@@ -533,7 +533,7 @@
          (line-start (current-point)))
        (yank)))))
 
-(define-command vi-replace-char (c)
+(define-vi-operator vi-replace-char (c)
     ((key-to-char (read-key)))
   (cond
     ((visual-p)

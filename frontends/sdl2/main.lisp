@@ -38,12 +38,6 @@
                        width
                        height))
 
-(defun get-character-size (font)
-  (let* ((surface (sdl2-ttf:render-text-solid font "A" 0 0 0 0))
-         (width (sdl2:surface-width surface))
-         (height (sdl2:surface-height surface)))
-    (list width height)))
-
 (defclass sdl2 (lem:implementation)
   ()
   (:default-initargs
@@ -78,11 +72,7 @@
    (focus :initform nil
           :accessor display-focus-p)
    (redraw-at-least-once :initform nil
-                         :accessor display-redraw-at-least-once-p)
-   (required-redisplay :initform nil
-                       :accessor display-required-redisplay-p)
-   (required-redisplay-mutex :initform (bt:make-lock "display-required-redisplay-mutex")
-                             :accessor display-required-redisplay-mutex)))
+                         :accessor display-redraw-at-least-once-p)))
 
 (defmethod display-latin-font ((display display))
   (font-latin-normal-font (display-font display)))
@@ -114,6 +104,11 @@
 (defmacro with-renderer (() &body body)
   `(call-with-renderer (lambda () ,@body)))
 
+(defmethod clear ((display display))
+  (sdl2:set-render-target (display-renderer display) (display-texture display))
+  (set-render-color display (display-background-color display))
+  (sdl2:render-fill-rect (display-renderer display) nil))
+
 (defmethod get-display-font ((display display) &key type bold)
   (check-type type (member :latin :cjk :emoji))
   (if (eq type :emoji)
@@ -143,11 +138,9 @@
                           (display-width display)
                           (display-height display)))))
 
-(defun apply-resize ()
-  (when (and (display-required-redisplay-p *display*)
-             (display-redraw-at-least-once-p *display*))
-    (setf (display-required-redisplay-p *display*) nil)
-    (with-renderer ()
+(defun notify-required-redisplay ()
+  (with-renderer ()
+    (when (display-redraw-at-least-once-p *display*)
       (sdl2:set-render-target (current-renderer) (display-texture *display*))
       (set-render-color *display* (display-background-color *display*))
       (sdl2:render-clear (current-renderer))
@@ -245,10 +238,9 @@
                                                   (lem:color-green color)
                                                   (lem:color-blue color)
                                                   0))
-           (width (sdl2:surface-width surface))
            (height (sdl2:surface-height surface))
            (texture (sdl2:create-texture-from-surface (current-renderer) surface)))
-      (render-texture (current-renderer) texture x y width height)
+      (render-texture (current-renderer) texture x y (* (display-char-width *display*) (length string)) height)
       (sdl2:destroy-texture texture)
       (length string))))
 
@@ -273,9 +265,9 @@
 (defun render-fill-text (texture text x y &key attribute)
   (sdl2:set-render-target (current-renderer) texture)
   (let ((width (lem:string-width text))
-        (underline (and attribute (lem:attribute-underline-p attribute)))
-        (bold (and attribute (lem:attribute-bold-p attribute)))
-        (reverse (and attribute (lem:attribute-reverse-p attribute))))
+        (underline (and attribute (lem:attribute-underline attribute)))
+        (bold (and attribute (lem:attribute-bold attribute)))
+        (reverse (and attribute (lem:attribute-reverse attribute))))
     (let ((background-color (if reverse
                                 (attribute-foreground-color attribute)
                                 (attribute-background-color attribute)))
@@ -285,7 +277,13 @@
       (render-fill-rect-to-current-texture x y width 1 :color background-color)
       (render-text text x y :color foreground-color :bold bold)
       (when underline
-        (render-underline x y width :color foreground-color)))))
+        (render-underline x
+                          y
+                          width
+                          :color (if (eq underline t)
+                                     foreground-color
+                                     (or (lem:parse-color underline)
+                                         foreground-color)))))))
 
 (defun render-fill-rect-by-pixels (x y width height &key color)
   (sdl2:with-rects ((rect x y width height))
@@ -297,44 +295,34 @@
          (y1 (- (* y (char-height)) (floor (char-height) 2)))
          (x2 (1- (+ x1 (* (+ w 1) (char-width)))))
          (y2 (+ y1 (* (+ h 1) (char-height)))))
-    (sdl2:with-rects ((up-rect x1
-                               y1
-                               (* (+ w 1) (char-width))
-                               (floor (char-height) 2))
-                      (left-rect x1
-                                 y1
-                                 (floor (char-width) 2)
-                                 (* (+ h 1) (char-height)))
-                      (right-rect (* (+ x w) (char-width))
-                                  y1
-                                  (floor (char-width) 2)
-                                  (* (+ h 1) (char-height)))
-                      (down-rect x1
-                                 (* (+ y h) (char-height))
-                                 (* (+ w 1) (char-width))
-                                 (floor (char-height) 2)))
-
+    (sdl2:with-rects ((rect x1 y1 (- x2 x1) (- y2 y1)))
       (set-render-color *display* (display-background-color *display*))
-      (sdl2:render-fill-rect (current-renderer) up-rect)
-      (sdl2:render-fill-rect (current-renderer) down-rect)
-      (sdl2:render-fill-rect (current-renderer) left-rect)
-      (sdl2:render-fill-rect (current-renderer) right-rect)
+      (sdl2:render-fill-rect (current-renderer) rect))
 
-      (set-render-color *display* (display-foreground-color *display*))
+    (sdl2:with-points ((upleft x1 y1)
+                       (downleft x1 y2)
+                       (downright x2 y2)
+                       (upright x2 y1))
       (if without-topline
-          (sdl2:with-points ((upleft x1 y1)
-                             (downleft x1 y2)
-                             (downright x2 y2)
-                             (upright x2 y1))
-            (let ((points (sdl2:points* upleft downleft downright upright)))
-              (sdl2:render-draw-lines (current-renderer)
-                                      points
-                                      4)))
-          (sdl2:with-rects ((border-rect x1
-                                         y1
-                                         (* (+ 1 w) (char-width))
-                                         (* (+ 1 h) (char-height))))
-            (sdl2:render-draw-rect (current-renderer) border-rect))))))
+          (progn
+            (set-render-color *display* (display-foreground-color *display*))
+            (sdl2:render-draw-lines (current-renderer) (sdl2:points* downleft upleft) 2)
+            (set-render-color *display* (display-foreground-color *display*))
+            (sdl2:render-draw-lines (current-renderer) (sdl2:points* upleft upright) 2))
+          (progn
+            (set-render-color *display* (display-foreground-color *display*))
+            (sdl2:render-draw-lines (current-renderer) (sdl2:points* downleft upleft upright) 3)))
+      (set-render-color *display* (display-foreground-color *display*))
+      (sdl2:render-draw-lines (current-renderer) (sdl2:points* upright downright downleft) 3)
+
+      ;; shadow
+      #+(or)
+      (sdl2:with-points ((downleft x1 (+ y2 2))
+                         (downright (1+ x2) (+ y2 2))
+                         (upright (+ x2 2) y1))
+        (set-render-color *display* (lem:parse-color "black"))
+        (sdl2:render-draw-lines (current-renderer) (sdl2:points* upright downright downleft) 3)))
+    ))
 
 (defun render-margin-line (x y height)
   (let ((attribute (lem:ensure-attribute 'lem:modeline-inactive)))
@@ -351,20 +339,16 @@
                                 (* height (char-height))
                                 :color (attribute-foreground-color attribute))))
 
-(defun notify-required-redisplay ()
-  (bt:with-lock-held ((display-required-redisplay-mutex *display*))
-    (setf (display-required-redisplay-p *display*) t)))
-
 (defun change-font (font-config)
-  (let ((display *display*))
-    (let ((font-config (merge-font-config font-config (display-font-config display))))
-      (close-font (display-font display))
-      (let ((font (open-font font-config)))
-        (setf (display-char-width display) (font-char-width font)
-              (display-char-height display) (font-char-height font))
-        (setf (display-font-config display) font-config)
-        (setf (display-font display) font)))
-    (notify-required-redisplay)))
+  (let ((font-config (merge-font-config font-config (display-font-config *display*))))
+    (close-font (display-font *display*))
+    (let ((font (open-font font-config)))
+      (setf (display-char-width *display*) (font-char-width font)
+            (display-char-height *display*) (font-char-height font))
+      (setf (display-font-config *display*) font-config)
+      (setf (display-font *display*) font))
+    (save-font-size font-config)
+    (lem:send-event :resize)))
 
 (defun create-view-texture (width height)
   (create-texture (current-renderer)
@@ -478,47 +462,57 @@
                     (- (view-height view) y (if (view-use-modeline view) 2 1))
                     :color (display-background-color *display*)))
 
+(defvar *cursor-shown* t)
+(defun show-cursor ()
+  (setf *cursor-shown* t)
+  (sdl2:show-cursor))
+(defun hide-cursor ()
+  (setf *cursor-shown* nil)
+  (sdl2:hide-cursor))
+
 (defun on-mouse-button-down (button x y clicks)
-  (sdl2:show-cursor)
+  (show-cursor)
   (let ((button
           (cond ((eql button sdl2-ffi:+sdl-button-left+) :button-1)
                 ((eql button sdl2-ffi:+sdl-button-right+) :button-3)
-                ((eql button sdl2-ffi:+sdl-button-middle+) :button-2))))
+                ((eql button sdl2-ffi:+sdl-button-middle+) :button-2)
+                ((eql button 4) :button-4))))
     (when button
       (let ((x (floor x (char-width)))
             (y (floor y (char-height))))
         (lem:send-event (lambda ()
-                          (lem::handle-mouse-button-down x y button clicks)
-                          (lem:redraw-display)))))))
+                          (lem::receive-mouse-button-down x y button clicks)))))))
 
 (defun on-mouse-button-up (button x y)
-  (sdl2:show-cursor)
+  (show-cursor)
   (let ((button
           (cond ((eql button sdl2-ffi:+sdl-button-left+) :button-1)
                 ((eql button sdl2-ffi:+sdl-button-right+) :button-3)
-                ((eql button sdl2-ffi:+sdl-button-middle+) :button-2))))
+                ((eql button sdl2-ffi:+sdl-button-middle+) :button-2)
+                ((eql button 4) :button-4)))
+        (x (floor x (char-width)))
+        (y (floor y (char-height))))
     (lem:send-event (lambda ()
-                      (lem::handle-mouse-button-up x y button)
-                      (lem:redraw-display)))))
+                      (lem::receive-mouse-button-up x y button)))))
 
 (defun on-mouse-motion (x y state)
-  (sdl2:show-cursor)
-  (when (= sdl2-ffi:+sdl-button-lmask+ (logand state sdl2-ffi:+sdl-button-lmask+))
+  (show-cursor)
+  (let ((button (if (= sdl2-ffi:+sdl-button-lmask+ (logand state sdl2-ffi:+sdl-button-lmask+))
+                    :button-1
+                    nil)))
     (let ((x (floor x (char-width)))
           (y (floor y (char-height))))
       (lem:send-event (lambda ()
-                        (lem::handle-mouse-motion x y :button-1)
-                        (when (= 0 (lem::event-queue-length))
-                          (lem:redraw-display)))))))
+                        (lem::receive-mouse-motion x y button))))))
 
 (defun on-mouse-wheel (wheel-x wheel-y which direction)
   (declare (ignore which direction))
-  (sdl2:show-cursor)
+  (show-cursor)
   (multiple-value-bind (x y) (sdl2:mouse-state)
     (let ((x (floor x (char-width)))
           (y (floor y (char-height))))
       (lem:send-event (lambda ()
-                        (lem::handle-mouse-wheel x y wheel-x wheel-y)
+                        (lem::receive-mouse-wheel x y wheel-x wheel-y)
                         (when (= 0 (lem::event-queue-length))
                           (lem:redraw-display)))))))
 
@@ -527,177 +521,51 @@
   (lem:send-event #'lem:redraw-display))
 
 (defun on-textinput (text)
-  (sdl2:hide-cursor)
+  (hide-cursor)
   (handle-text-input (get-platform) text))
 
 (defun on-keydown (key-event)
-  (sdl2:hide-cursor)
+  (hide-cursor)
   (handle-key-down (get-platform) key-event))
 
 (defun on-keyup (key-event)
   (handle-key-up (get-platform) key-event))
 
 (defun on-windowevent (event)
-  (cond ((or (equal event
-                    sdl2-ffi:+sdl-windowevent-shown+)
-             (equal event
-                    sdl2-ffi:+sdl-windowevent-exposed+))
-         (notify-required-redisplay))
-        ((equal event sdl2-ffi:+sdl-windowevent-resized+)
-         (update-texture *display*)
-         (notify-required-redisplay))
-        ((equal event sdl2-ffi:+sdl-windowevent-focus-gained+)
-         (setf (display-focus-p *display*) t))
-        ((equal event sdl2-ffi:+sdl-windowevent-focus-lost+)
-         (setf (display-focus-p *display*) nil))))
-
-(defun convert-event (event)
-  (let ((event-type (sdl2:get-event-type event)))
-    (case event-type
-      (:quit
-       (list event-type))
-      (:textinput
-       (let ((text (plus-c:c-ref event sdl2-ffi:sdl-event :text :text string)))
-         (list event-type text)))
-      (:textediting
-       (let ((text (plus-c:c-ref event sdl2-ffi:sdl-event :edit :text string)))
-         (list event-type text)))
-      (:keydown
-       (when (display-focus-p *display*)
-         (let* ((keysym (plus-c:c-ref event sdl2-ffi:sdl-event :key :keysym))
-                (code (sdl2:sym-value keysym))
-                (modifier (lem-sdl2/keyboard::get-modifier keysym)))
-           (list event-type (make-key-event code modifier)))))
-      (:keyup
-       (let* ((keysym (plus-c:c-ref event sdl2-ffi:sdl-event :key :keysym))
-              (code (sdl2:sym-value keysym))
-              (modifier (lem-sdl2/keyboard::get-modifier keysym)))
-         (list event-type (make-key-event code modifier))))
-      (:mousebuttondown
-       (let ((button
-               (plus-c:c-ref event
-                             sdl2-ffi:sdl-event
-                             :button :button))
-             (x
-               (plus-c:c-ref event
-                             sdl2-ffi:sdl-event
-                             :button :x))
-             (y
-               (plus-c:c-ref event
-                             sdl2-ffi:sdl-event
-                             :button :y))
-             (clicks
-               (plus-c:c-ref event
-                             sdl2-ffi:sdl-event
-                             :button :clicks)))
-         (list event-type
-               button
-               x
-               y
-               clicks)))
-      (:mousebuttonup
-       (let ((button
-               (plus-c:c-ref event
-                             sdl2-ffi:sdl-event
-                             :button :button))
-             (x
-               (plus-c:c-ref event
-                             sdl2-ffi:sdl-event
-                             :button :x))
-             (y
-               (plus-c:c-ref event
-                             sdl2-ffi:sdl-event
-                             :button :y)))
-         (list event-type button x y)))
-      (:mousemotion
-       (let ((x
-               (plus-c:c-ref event
-                             sdl2-ffi:sdl-event
-                             :motion :x))
-             (y
-               (plus-c:c-ref event
-                             sdl2-ffi:sdl-event
-                             :motion :y))
-             (state
-               (plus-c:c-ref event
-                             sdl2-ffi:sdl-event
-                             :motion :state)))
-         (list event-type x y state)))
-      (:mousewheel
-       (let ((x
-               (plus-c:c-ref event
-                             sdl2-ffi:sdl-event
-                             :wheel :x))
-             (y
-               (plus-c:c-ref event
-                             sdl2-ffi:sdl-event
-                             :wheel :y))
-             (which
-               (plus-c:c-ref event
-                             sdl2-ffi:sdl-event
-                             :wheel :which))
-             (direction
-               (plus-c:c-ref event
-                             sdl2-ffi:sdl-event
-                             :wheel :direction)))
-         (list event-type x y which direction)))
-      (:windowevent
-       (let ((event
-               (plus-c:c-ref event
-                             sdl2-ffi:sdl-event
-                             :window :event)))
-         (list event-type event))))))
-
-(defun next-events (event)
-  (bt:with-lock-held ((display-required-redisplay-mutex *display*))
-    (apply-resize)
-    (sdl2:next-event event :wait)
-    (let ((events '()))
-      (alexandria:when-let (event (convert-event event))
-        (push event events))
-      (loop :for rc := (sdl2:next-event event :poll)
-            :while (= rc 1)
-            :do (alexandria:when-let (event (convert-event event))
-                  (push event events)))
-      (nreverse events))))
+  (alexandria:switch (event)
+    (sdl2-ffi:+sdl-windowevent-shown+
+     (notify-required-redisplay))
+    (sdl2-ffi:+sdl-windowevent-exposed+
+     (notify-required-redisplay))
+    (sdl2-ffi:+sdl-windowevent-resized+
+     (update-texture *display*)
+     (notify-required-redisplay))
+    (sdl2-ffi:+sdl-windowevent-focus-gained+
+     (setf (display-focus-p *display*) t))
+    (sdl2-ffi:+sdl-windowevent-focus-lost+
+     (setf (display-focus-p *display*) nil))))
 
 (defun event-loop ()
-  (sdl2:in-main-thread ()
-    (sdl2:with-sdl-event (event)
-      (loop
-        (let ((events (next-events event)))
-          (loop :for (type . args) :in events
-                :do (case type
-                      (:quit
-                       (return-from event-loop))
-                      (:textinput
-                       (destructuring-bind (text) args
-                         (on-textinput text)))
-                      (:textediting
-                       (destructuring-bind (text) args
-                         (on-textediting text)))
-                      (:keydown
-                       (destructuring-bind (key-event) args
-                         (on-keydown key-event)))
-                      (:keyup
-                       (destructuring-bind (key-event) args
-                         (on-keyup key-event)))
-                      (:mousebuttondown
-                       (destructuring-bind (button x y clicks) args
-                         (on-mouse-button-down button x y
-                                               clicks)))
-                      (:mousebuttonup
-                       (destructuring-bind (button x y) args
-                         (on-mouse-button-up button x y)))
-                      (:mousemotion
-                       (destructuring-bind (x y state) args
-                         (on-mouse-motion x y state)))
-                      (:mousewheel
-                       (destructuring-bind (x y which direction) args
-                         (on-mouse-wheel x y which direction)))
-                      (:windowevent
-                       (destructuring-bind (event) args
-                         (on-windowevent event))))))))))
+  (sdl2:with-event-loop (:method :wait)
+    (:quit () t)
+    (:textinput (:text text)
+     (on-textinput text))
+    (:textediting (:text text)
+     (on-textediting text))
+    (:keydown (:keysym keysym)
+     (on-keydown (keysym-to-key-event keysym)))
+    (:keyup (:keysym keysym)
+     (on-keyup (keysym-to-key-event keysym)))
+    (:mousebuttondown (:button button :x x :y y :clicks clicks)
+     (on-mouse-button-down button x y clicks))
+    (:mousebuttonup (:button button :x x :y y)
+     (on-mouse-button-up button x y))
+    (:mousemotion (:x x :y y :state state)
+     (on-mouse-motion x y state))
+    (:mousewheel (:x x :y y :which which :direction direction)
+     (on-mouse-wheel x y which direction))
+    (:windowevent (:event event)
+     (on-windowevent event))))
 
 (defun create-display (function)
   (sdl2:with-init (:video)
@@ -820,6 +688,11 @@
     (with-renderer ()
       (clear-eob view x y))))
 
+(defmethod lem-if:redraw-view-before ((implementation sdl2) view)
+  (with-debug ("lem-if:redraw-view-before" view)
+    (with-renderer ()
+      (render-border-using-view view))))
+
 (defmethod lem-if:redraw-view-after ((implementation sdl2) view)
   (with-debug ("lem-if:redraw-view-after" view)
     (with-renderer ()
@@ -835,8 +708,7 @@
         (sdl2:render-copy (current-renderer)
                           (view-texture view)
                           :dest-rect dest-rect
-                          :source-rect src-rect))
-      (render-border-using-view view))))
+                          :source-rect src-rect)))))
 
 (defmethod lem-if::will-update-display ((implementation sdl2))
   (with-debug ("will-update-display")
@@ -864,6 +736,8 @@
                                                       0))
                (texture (sdl2:create-texture-from-surface (display-renderer *display*) surface)))
           (sdl2:with-rects ((rect x y (sdl2:surface-width surface) (sdl2:surface-height surface)))
+            (set-render-color *display* (display-background-color *display*))
+            (sdl2:render-fill-rect (display-renderer *display*) rect)
             (sdl2:render-copy (display-renderer *display*) texture :dest-rect rect))
           (sdl2:destroy-texture texture))))))
 
@@ -903,5 +777,22 @@
       (let ((font-config (display-font-config *display*)))
         (change-font (change-size font-config
                                   (1- (font-config-size font-config))))))))
+
+(defmethod lem-if:resize-display-before ((implementation sdl2))
+  (with-debug ("resize-display-before")
+    (with-renderer ()
+      (clear *display*))))
+
+(defmethod lem-if:get-font-list ((implementation sdl2))
+  (get-font-list (get-platform)))
+
+(defmethod lem-if:get-mouse-position ((implementation sdl2))
+  (if (not *cursor-shown*)
+      (values 0 0)
+      (multiple-value-bind (x y bitmask)
+          (sdl2:mouse-state)
+        (declare (ignore bitmask))
+        (values (floor x (display-char-width *display*))
+                (floor y (display-char-height *display*))))))
 
 (pushnew :lem-sdl2 *features*)

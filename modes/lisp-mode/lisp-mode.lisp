@@ -32,6 +32,7 @@
   (setf (variable-value 'indent-tabs-mode) nil)
   (setf (variable-value 'enable-syntax-highlight) t)
   (setf (variable-value 'calc-indent-function) 'calc-indent)
+  (setf (variable-value 'indent-when-yank) t)
   (setf (variable-value 'line-comment) ";")
   (setf (variable-value 'insertion-line-comment) ";; ")
   (setf (variable-value 'language-mode-tag) 'lisp-mode)
@@ -523,13 +524,16 @@
     (let ((overlay (make-overlay point
                                  (or (form-offset (copy-point point :temporary) 1)
                                      (buffer-end-point buffer))
-                                 'compiler-note-attribute)))
-      (overlay-put overlay 'message
-                   (with-output-to-string (out)
+                                 'compiler-note-attribute))
+          (message (with-output-to-string (out)
                      (write-string message out)
                      (when source-context
                        (terpri out)
-                       (write-string source-context out))))
+                       (write-string source-context out)))))
+      (lem::set-hover-message overlay
+                              message
+                              :style '(:gravity :mouse-cursor :offset-y 1))
+      (overlay-put overlay 'message message)
       overlay)))
 
 (defvar *note-overlays* nil)
@@ -570,14 +574,16 @@
       (return))))
 
 (defun move-to-next-compilation-notes (point)
-  (alexandria:when-let ((overlay (loop :for overlay :in (buffer-compilation-notes-overlays (point-buffer point))
+  (alexandria:when-let ((overlay (loop :for overlay :in (buffer-compilation-notes-overlays
+                                                         (point-buffer point))
                                        :when (point< point (overlay-start overlay))
                                        :return overlay)))
     (move-point point (overlay-start overlay))))
 
 (defun move-to-previous-compilation-notes (point)
   (alexandria:when-let ((overlay (loop :for last-overlay := nil :then overlay
-                                       :for overlay :in (buffer-compilation-notes-overlays (point-buffer point))
+                                       :for overlay :in (buffer-compilation-notes-overlays
+                                                         (point-buffer point))
                                        :when (point<= point (overlay-start overlay))
                                        :return last-overlay
                                        :finally (return last-overlay))))
@@ -1264,9 +1270,9 @@
 (defun sit-for* (second)
   (loop :with end-time := (+ (get-internal-real-time)
                              (* second internal-time-units-per-second))
-        :for e := (read-event (float
-                               (/ (- end-time (get-internal-real-time))
-                                  internal-time-units-per-second)))
+        :for e := (lem::receive-event (float
+                                       (/ (- end-time (get-internal-real-time))
+                                          internal-time-units-per-second)))
         :while (key-p e)))
 
 (define-command slime-restart () ()

@@ -141,7 +141,7 @@
                     (peek-killring-item (current-killring) (1- arg)))))
     (change-yank-start (current-point)
                        (copy-point (current-point) :right-inserting))
-    (insert-string (current-point) string)
+    (insert-string-and-indent (current-point) string)
     (change-yank-end (current-point)
                      (copy-point (current-point) :left-inserting))
     (continue-flag :yank)))
@@ -504,7 +504,7 @@
 (define-command show-context-menu () ()
   (let ((context-menu (buffer-context-menu (current-buffer))))
     (when context-menu
-      (lem-if:display-context-menu (implementation) context-menu))))
+      (lem-if:display-context-menu (implementation) context-menu '(:gravity :cursor)))))
 
 (define-command font-size-increase () ()
   (lem-if:increase-font-size (implementation)))

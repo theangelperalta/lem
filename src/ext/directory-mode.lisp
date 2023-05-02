@@ -12,15 +12,12 @@
   (t))
 
 (define-attribute directory-attribute
-  (:light :foreground "blue" :bold-p t)
+  (:light :foreground "blue" :bold t)
   (:dark :foreground "sky blue"))
 
 (define-attribute link-attribute
   (:light :foreground "cyan")
   (:dark :foreground "green"))
-
-(define-attribute current-line-attribute
-  (t :underline-p t))
 
 (define-major-mode directory-mode ()
     (:name "Directory"
@@ -57,15 +54,19 @@
     (when (string/= error-string "")
       (editor-error "~A" error-string))))
 
-(defun update-line (point)
-  (let ((ov (buffer-value point 'line-overlay)))
-    (cond (ov
-           (line-start (move-point (overlay-start ov) point))
-           (line-end (move-point (overlay-end ov) point)))
-          (t
-           (with-point ((s point) (e point))
-             (setf ov (make-overlay (line-start s) (line-end e) 'current-line-attribute))
-             (overlay-put ov :display-line t)
+(defun update-line (point &optional move-cursor-to-file-position)
+  (with-point ((start point)
+               (end point))
+    (back-to-indentation (line-start start))
+    (line-end end)
+    (when move-cursor-to-file-position
+      (move-point point start))
+    (let ((ov (buffer-value point 'line-overlay)))
+      (cond (ov
+             (move-point (overlay-start ov) start)
+             (move-point (overlay-end ov) end))
+            (t
+             (setf ov (make-overlay start end 'region))
              (setf (buffer-value point 'line-overlay) ov))))))
 
 (defun move-to-start-line (point)
@@ -145,28 +146,50 @@
               (return (format nil "~D~C" (1+ (floor size val)) sign)))
         :finally (return (princ-to-string size))))
 
+(defun insert-icon (point pathname)
+  (when (uiop:directory-pathname-p pathname)
+    (insert-string point "📁")))
+
 (defun insert-pathname (point pathname directory &optional content)
-  (let ((name (or content (namestring (enough-namestring pathname directory)))))
-    (insert-string point "  " 'pathname pathname 'name name)
-    (insert-string point (format nil " ~5@A "
-                                 (let ((size (file-size pathname)))
-                                   (if size (human-readable-file-size size) ""))))
-    (multiple-value-bind (second minute hour day month year week)
-        (let ((date (file-write-date pathname)))
-          (if date
-              (decode-universal-time date)
-              (values 0 0 0 0 0 0 nil)))
+  (with-point ((start point))
+    (let ((name (or content (namestring (enough-namestring pathname directory)))))
+      (insert-string point "  " 'pathname pathname 'name name)
+      (insert-string point (format nil " ~5@A "
+                                   (let ((size (file-size pathname)))
+                                     (if size (human-readable-file-size size) ""))))
+      (multiple-value-bind (second minute hour day month year week)
+          (let ((date (file-write-date pathname)))
+            (if date
+                (decode-universal-time date)
+                (values 0 0 0 0 0 0 nil)))
+        (insert-string point
+                       (format nil "~4,'0D/~2,'0D/~2,'0D ~2,'0D:~2,'0D:~2,'0D ~A "
+                               year month day hour minute second
+                               (if week (aref #("Mon" "Tue" "Wed" "Thr" "Fri" "Sat" "Sun") week)
+                                   "   "))))
+      (insert-icon point name)
       (insert-string point
-                     (format nil "~4,'0D/~2,'0D/~2,'0D ~2,'0D:~2,'0D:~2,'0D ~A "
-                             year month day hour minute second
-                             (if week (aref #("Mon" "Tue" "Wed" "Thr" "Fri" "Sat" "Sun") week)
-                                 "   "))))
-    (insert-string point
-                   name
-                   :attribute (get-file-attribute pathname))
-    (when (symbolic-link-p pathname)
-      (insert-string point (format nil " -> ~A" (probe-file pathname))))
-    (insert-character point #\newline)))
+                     name
+                     :attribute (get-file-attribute pathname)
+                     :file pathname)
+      (when (symbolic-link-p pathname)
+        (insert-string point (format nil " -> ~A" (probe-file pathname))))
+      (back-to-indentation start)
+      (put-text-property
+       start
+       point
+       :hover-callback (lambda (window dest-point)
+                         (let* ((src-point (buffer-point (window-buffer window))))
+                           (move-point src-point dest-point)
+                           (update-line src-point t))))
+      (put-text-property
+       start
+       point
+       :click-callback
+       (lambda (window dest-point)
+         (declare (ignore window dest-point))
+         (directory-mode-find-file)))
+      (insert-character point #\newline))))
 
 (defun update (buffer)
   (with-buffer-read-only buffer nil

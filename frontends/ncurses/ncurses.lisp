@@ -49,18 +49,28 @@
   width
   height)
 
+(defun underline-color (attribute)
+  (cond ((eq t (lem::attribute-underline attribute))
+         nil)
+        ((and (lem::attribute-underline attribute)
+              (lem:parse-color (lem::attribute-underline attribute)))
+         (lem::attribute-underline attribute))
+        (t
+         nil)))
+
 (defun compute-attribute-value (attribute cursorp)
-  (let* ((foreground (attribute-foreground attribute))
+  (let* ((underline-color (underline-color attribute))
+         (foreground (or underline-color (attribute-foreground attribute)))
          (background (or (attribute-background attribute)
                          lem-if:*background-color-of-drawing-window*))
-         (bits (logior (if (or cursorp (lem::attribute-reverse-p attribute))
+         (bits (logior (if (or cursorp (lem::attribute-reverse attribute))
                            (lem.term:get-color-pair background foreground)
                            (lem.term:get-color-pair foreground background))
                        0
-                       (if (lem::attribute-bold-p attribute)
+                       (if (lem::attribute-bold attribute)
                            charms/ll:a_bold
                            0)
-                       (if (lem::attribute-underline-p attribute)
+                       (if (lem::attribute-underline attribute)
                            charms/ll:a_underline
                            0))))
     bits))

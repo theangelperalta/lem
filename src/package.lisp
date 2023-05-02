@@ -64,14 +64,14 @@
    :set-attribute
    :set-attribute-foreground
    :set-attribute-background
-   :set-attribute-reverse-p
-   :set-attribute-bold-p
-   :set-attribute-underline-p
+   :set-attribute-reverse
+   :set-attribute-bold
+   :set-attribute-underline
    :attribute-foreground
    :attribute-background
-   :attribute-reverse-p
-   :attribute-bold-p
-   :attribute-underline-p
+   :attribute-reverse
+   :attribute-bold
+   :attribute-underline
    :define-attribute
    :cursor
    :region
@@ -533,6 +533,7 @@
    :print-modeline
    :clear-eol
    :clear-eob
+   :redraw-view-before
    :redraw-view-after
    :will-update-display
    :update-display
@@ -554,7 +555,10 @@
    :clipboard-paste
    :clipboard-copy
    :increase-font-size
-   :decrease-font-size))
+   :decrease-font-size
+   :resize-display-before
+   :get-font-list
+   :get-mouse-position))
 
 (defpackage :lem-user
   (:use :cl :lem))

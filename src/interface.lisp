@@ -53,6 +53,8 @@
 (defgeneric lem-if:print-modeline (implementation view x y string attribute))
 (defgeneric lem-if:clear-eol (implementation view x y))
 (defgeneric lem-if:clear-eob (implementation view x y))
+(defgeneric lem-if:redraw-view-before (implementation view)
+  (:method (implementation view)))
 (defgeneric lem-if:redraw-view-after (implementation view)
   (:method (implementation view)))
 (defgeneric lem-if::will-update-display (implementation)
@@ -84,8 +86,8 @@
                                                                                source-window
                                                                                style))
 (defgeneric lem-if:delete-popup-message (implementation popup-message))
-(defgeneric lem-if:display-context-menu (implementation context-menu)
-  (:method (implementation context-menu)))
+(defgeneric lem-if:display-context-menu (implementation context-menu style)
+  (:method (implementation context-menu style)))
 
 (defgeneric lem-if:clipboard-paste (implementation)
   (:method (implementation)))
@@ -96,6 +98,16 @@
   (:method (implementation)))
 (defgeneric lem-if:decrease-font-size (implementation)
   (:method (implementation)))
+
+(defgeneric lem-if:resize-display-before (implementation)
+  (:method (implementation)))
+
+(defgeneric lem-if:get-font-list (implementation)
+  (:method (implementation) '()))
+
+(defgeneric lem-if:get-mouse-position (implementation)
+  (:method (implementation)
+    (values 0 0)))
 
 (defvar *display-background-mode* nil)
 

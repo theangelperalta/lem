@@ -8,12 +8,14 @@
            :font-emoji-font
            :font-char-width
            :font-char-height
+           :save-font-size
            :make-font-config
            :font-config-size
            :merge-font-config
            :change-size
            :open-font
-           :close-font))
+           :close-font
+           :get-font-list))
 (in-package :lem-sdl2/font)
 
 (defstruct (font-config (:constructor %make-font-config))
@@ -33,7 +35,10 @@
   char-width
   char-height)
 
-(defun make-font-config (&key size
+(defun save-font-size (font-config)
+  (setf (lem:config :sdl2-font-size) (font-config-size font-config)))
+
+(defun make-font-config (&key (size (lem:config :sdl2-font-size 20))
                               latin-normal-file
                               latin-bold-file
                               cjk-normal-file
@@ -83,11 +88,12 @@
                                      (font-config-emoji-file old))))
 
 (defun change-size (font-config size)
-  (setf (font-config-size font-config) size)
-  font-config)
+  (let ((font-config (copy-font-config font-config)))
+    (setf (font-config-size font-config) size)
+    font-config))
 
 (defun get-character-size (font)
-  (let* ((surface (sdl2-ttf:render-text-solid font "A" 0 0 0 0))
+  (let* ((surface (sdl2-ttf:render-text-solid font " " 0 0 0 0))
          (width (sdl2:surface-width surface))
          (height (sdl2:surface-height surface)))
     (list width height)))
@@ -121,3 +127,14 @@
   (sdl2-ttf:close-font (font-cjk-bold-font font))
   (sdl2-ttf:close-font (font-emoji-font font))
   (values))
+
+(defgeneric get-font-list (platform))
+
+(defmethod get-font-list (platform)
+  '())
+
+(defmethod get-font-list ((platform lem-sdl2/platform:linux))
+  (loop :for line :in (split-sequence:split-sequence #\newline
+                                                     (uiop:run-program "fc-list" :output :string)
+                                                     :remove-empty-subseqs t)
+        :collect (first (split-sequence:split-sequence #\: line :count 1))))

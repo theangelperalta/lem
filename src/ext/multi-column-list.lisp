@@ -191,7 +191,7 @@
                              (1+ (loop :for width :in (print-spec-column-width-list print-spec)
                                        :sum (1+ width)))
                              t)
-             (put-text-property start point :attribute (make-attribute :underline-p t))))
+             (put-text-property start point :attribute (make-attribute :underline t))))
           (columns
            (with-point ((start point))
              (loop :for width :in (print-spec-column-width-list print-spec)
@@ -201,17 +201,32 @@
                          (insert-string point column-header)
                          (move-to-column point (+ column width) t)))
              (insert-string point " ")
-             (put-text-property start point :attribute (make-attribute :underline-p t)))))))
+             (put-text-property start point :attribute (make-attribute :underline t)))))))
 
 (defmethod lem/popup-menu:apply-print-spec ((print-spec print-spec) point item)
   (check-type item multi-column-list-item)
-  (loop :for value :in (map-columns (print-spec-multi-column-list print-spec) item)
-        :for width :in (print-spec-column-width-list print-spec)
-        :do (insert-string point " ")
-            (let ((column (point-column point)))
-              (insert-string point value)
-              (move-to-column point (+ column width) t)))
-  (insert-string point " "))
+  (with-point ((start point))
+    (loop :for value :in (map-columns (print-spec-multi-column-list print-spec) item)
+          :for width :in (print-spec-column-width-list print-spec)
+          :do (insert-string point " ")
+              (let ((column (point-column point)))
+                (insert-string point value)
+                (move-to-column point (+ column width) t)))
+    (insert-string point " ")
+    (put-text-property start
+                       point
+                       :click-callback (lambda (window point)
+                                         (click-menu-item
+                                          (print-spec-multi-column-list print-spec)
+                                          window
+                                          point)))
+    (put-text-property start
+                       point
+                       :hover-callback (lambda (window point)
+                                         (declare (ignore window))
+                                         (hover-menu-item
+                                          (print-spec-multi-column-list print-spec)
+                                          point)))))
 
 (defun compute-column-width-list (multi-column-list)
   (let ((width-matrix
@@ -285,6 +300,15 @@
                        :print-spec (multi-column-list-print-spec component)
                        :max-display-items 100
                        :keep-focus t)))
+
+(defun hover-menu-item (multi-column-list point)
+  (lem/popup-menu::move-focus (multi-column-list-popup-menu multi-column-list)
+                              (lambda (focus-point)
+                                (move-point focus-point point))))
+
+(defun click-menu-item (multi-column-list window point)
+  (move-point (buffer-point (window-buffer window)) point)
+  (popup-menu-select (multi-column-list-popup-menu multi-column-list)))
 
 (defun check-current-item (multi-column-list)
   (when (multi-column-list-use-check-p multi-column-list)

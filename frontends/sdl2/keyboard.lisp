@@ -1,6 +1,6 @@
 (defpackage :lem-sdl2/keyboard
   (:use :cl)
-  (:export :make-key-event
+  (:export :keysym-to-key-event
            :handle-textediting
            :handle-text-input
            :handle-key-down
@@ -78,6 +78,11 @@
 (defun make-key-event (code modifier)
   (%make-key-event :code code :modifier modifier))
 
+(defun keysym-to-key-event (keysym)
+  (let ((code (sdl2:sym-value keysym))
+        (modifier (lem-sdl2/keyboard::get-modifier keysym)))
+    (make-key-event code modifier)))
+
 (defun get-modifier (keysym)
   (let* ((mod (sdl2:mod-value keysym))
          (shift (= 1 (logand 1 mod)))
@@ -102,15 +107,20 @@
       (lem:send-event key)))
 
 ;; linux
+(defun modifier-is-accept-text-input-p (modifier)
+  (or (not (modifier-ctrl modifier))
+      (modifier-shift modifier)))
+
 (defmethod handle-text-input ((platform lem-sdl2/platform:linux) text)
-  (loop :for c :across text
-        :do (multiple-value-bind (sym text-input-p) (convert-to-sym (char-code c))
-              (let ((key (lem:make-key :ctrl (modifier-ctrl *modifier*)
-                                       :meta (modifier-meta *modifier*)
-                                       :shift nil
-                                       :sym sym)))
-                (when text-input-p
-                  (send-key-event key))))))
+  (when (modifier-is-accept-text-input-p *modifier*)
+    (loop :for c :across text
+          :do (multiple-value-bind (sym text-input-p) (convert-to-sym (char-code c))
+                (let ((key (lem:make-key :ctrl (modifier-ctrl *modifier*)
+                                         :meta (modifier-meta *modifier*)
+                                         :shift nil
+                                         :sym sym)))
+                  (when text-input-p
+                    (send-key-event key)))))))
 
 (defmethod handle-key-down ((platform lem-sdl2/platform:linux) key-event)
   (let ((modifier (key-event-modifier key-event))
@@ -119,7 +129,7 @@
     (multiple-value-bind (sym text-input-p) (convert-to-sym code)
       (when (and sym
                  (or (not text-input-p)
-                     (modifier-ctrl modifier)
+                     (not (modifier-is-accept-text-input-p *modifier*))
                      (< 256 code)))
         (let ((key (make-key :shift (modifier-shift modifier)
                              :ctrl (modifier-ctrl modifier)

@@ -75,6 +75,9 @@
     :initform nil
     :initarg :cursor-invisible
     :accessor window-cursor-invisible-p)
+   (last-mouse-button-down-point
+    :initform nil
+    :accessor window-last-mouse-button-down-point)
    (parameters
     :initform nil
     :accessor window-parameters)))
@@ -171,6 +174,11 @@
       (move-point (buffer-point buffer)
                   (%window-point new-window)))
     (setf (frame-current-window frame) new-window)))
+
+(defun switch-to-window (new-window)
+  (unless (eq (current-window) new-window)
+    (run-hooks (window-leave-hook (current-window)) (current-window)))
+  (setf (current-window) new-window))
 
 (defun window-list (&optional (frame (current-frame)))
   (window-tree-flatten (frame-window-tree frame)))
@@ -650,7 +658,15 @@ window width is changed, we must recalc the window view point."
   (set-window-x x window)
   (set-window-y y window))
 
+(defun valid-window-height-p (height)
+  (plusp height))
+
+(defun valid-window-width-p (width)
+  (< 2 width))
+
 (defun window-set-size (window width height)
+  (assert (valid-window-width-p width))
+  (assert (valid-window-height-p height))
   (notify-frame-redisplay-required (current-frame))
   (when (floating-window-p window)
     (notify-floating-window-modified (current-frame)))
@@ -761,7 +777,7 @@ window width is changed, we must recalc the window view point."
   (let ((shrink-window-list
           (funcall collect-windows-fn window-list)))
     (dolist (window shrink-window-list)
-      (when (not (funcall check-fn window))
+      (unless (funcall check-fn window)
         (return-from %shrink-windows nil)))
     (cond ((/= 0 diff-width)
            (dolist (window shrink-window-list)
@@ -781,65 +797,83 @@ window width is changed, we must recalc the window view point."
   (%shrink-windows window-list
                    #'collect-top-windows
                    (lambda (window)
-                     (< 2 (window-height window)))
+                     (and (<= 0 (+ (window-y window) n))
+                          (valid-window-height-p (- (window-height window) n))))
                    n 0 n 0))
 
 (defun shrink-bottom-windows (window-list n)
   (%shrink-windows window-list
                    #'collect-bottom-windows
                    (lambda (window)
-                     (< 2 (window-height window)))
+                     (valid-window-height-p (- (window-height window) n)))
                    n 0 0 0))
 
 (defun shrink-left-windows (window-list n)
   (%shrink-windows window-list
                    #'collect-left-windows
                    (lambda (window)
-                     (< 2 (window-width window)))
+                     (and (<= 0 (+ (window-x window) n))
+                          (valid-window-width-p (- (window-width window) n))))
                    0 n 0 n))
 
 (defun shrink-right-windows (window-list n)
   (%shrink-windows window-list
                    #'collect-right-windows
                    (lambda (window)
-                     (< 2 (window-width window)))
+                     (valid-window-width-p (- (window-width window) n)))
                    0 n 0 0))
 
 (defun %grow-windows (window-list
                       collect-windows-fn
+                      check-fn
                       diff-height
                       diff-width
                       shift-height
                       shift-width)
-  (dolist (window (funcall collect-windows-fn window-list))
-    (cond ((/= 0 shift-width)
-           (window-move window shift-width 0))
-          ((/= 0 shift-height)
-           (window-move window 0 shift-height)))
-    (cond ((/= 0 diff-width)
-           (window-resize window diff-width 0))
-          ((/= 0 diff-height)
-           (window-resize window 0 diff-height))))
+  (let ((grow-window-list
+          (funcall collect-windows-fn window-list)))
+    (dolist (window grow-window-list)
+      (unless (funcall check-fn window)
+        (return-from %grow-windows nil)))
+    (dolist (window grow-window-list)
+      (cond ((/= 0 shift-width)
+             (window-move window shift-width 0))
+            ((/= 0 shift-height)
+             (window-move window 0 shift-height)))
+      (cond ((/= 0 diff-width)
+             (window-resize window diff-width 0))
+            ((/= 0 diff-height)
+             (window-resize window 0 diff-height)))))
   t)
 
 (defun grow-top-windows (window-list n)
   (%grow-windows window-list
                  #'collect-top-windows
+                 (lambda (window)
+                   (and (<= 0 (- (window-y window) n))
+                        (valid-window-height-p (+ (window-height window) n))))
                  n 0 (- n) 0))
 
 (defun grow-bottom-windows (window-list n)
   (%grow-windows window-list
                  #'collect-bottom-windows
+                 (lambda (window)
+                   (valid-window-height-p (+ (window-height window) n)))
                  n 0 0 0))
 
 (defun grow-left-windows (window-list n)
   (%grow-windows window-list
                  #'collect-left-windows
+                 (lambda (window)
+                   (and (<= 0 (- (window-x window) n))
+                        (valid-window-width-p (+ (window-width window) n))))
                  0 n 0 (- n)))
 
 (defun grow-right-windows (window-list n)
   (%grow-windows window-list
                  #'collect-right-windows
+                 (lambda (window)
+                   (valid-window-width-p (+ (window-width window) n)))
                  0 n 0 0))
 
 (defun grow-window-internal (grow-window-list shrink-window-list n)
@@ -1182,6 +1216,7 @@ window width is changed, we must recalc the window view point."
                   (+ (max-window-height (current-frame)) (topleft-window-y (current-frame)))))
 
 (defun change-display-size-hook ()
+  (lem-if:resize-display-before (implementation))
   (adjust-all-window-size)
   (clear-screens-of-window-list)
   (redraw-display))
@@ -1221,12 +1256,14 @@ window width is changed, we must recalc the window view point."
                (dolist (window (frame-floating-windows (current-frame)))
                  (window-redraw window (redraw-after-modifying-floating-window (implementation)))))
              (redraw-all-windows ()
+               (lem-if:will-update-display (implementation))
                (redraw-header-windows force)
                (redraw-window-list
-                (or (frame-require-redisplay-windows (current-frame))
-                    (and (redraw-after-modifying-floating-window (implementation))
-                         ;; floating-windowが変更されたら、その下のウィンドウは再描画する必要がある
-                         (frame-modified-floating-windows (current-frame)))
+                (if (redraw-after-modifying-floating-window (implementation))
+                    (or (frame-require-redisplay-windows (current-frame))
+                        ;; floating-windowが変更されたら、その下のウィンドウは再描画する必要がある
+                        (frame-modified-floating-windows (current-frame))
+                        force)
                     force))
                (redraw-floating-windows)
                (lem-if:update-display (implementation))))

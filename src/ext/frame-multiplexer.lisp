@@ -10,13 +10,13 @@
 (defvar *virtual-frame-map* (make-hash-table))
 
 (define-attribute frame-multiplexer-active-frame-name-attribute
-  (t :foreground "white" :background "CornflowerBlue" :bold-p t))
+  (t :foreground "white" :background "CornflowerBlue" :bold t))
 
 (define-attribute frame-multiplexer-frame-name-attribute
-  (t :foreground "black" :background "dark gray" :bold-p t))
+  (t :foreground "black" :background "dark gray" :bold t))
 
 (define-attribute frame-multiplexer-background-attribute
-  (t :foreground "white" :background "#303030"))
+  (t :foreground "white" :background "#262626"))
 
 (define-editor-variable frame-multiplexer nil ""
   (lambda (value)
@@ -203,7 +203,8 @@
                                     tab
                                     (let ((frame frame))
                                       (lambda ()
-                                        (switch-current-frame window frame))))
+                                        (switch-current-frame window frame)
+                                        (lem::change-display-size-hook))))
                 (when (tab-focus-p tab)
                   ;; set buffer-point to that focused tab position
                   (let ((end-pos (point-charpos p)))
@@ -293,8 +294,7 @@
   (let* ((vf (gethash (implementation) *virtual-frame-map*))
          (frame (search-previous-frame vf (virtual-frame-current vf))))
     (when frame
-      (switch-current-frame vf frame))
-    (lem::change-display-size-hook)))
+      (switch-current-frame vf frame))))
 
 (define-key *global-keymap* "C-z n" 'frame-multiplexer-next)
 (define-command frame-multiplexer-next () ()
@@ -302,8 +302,7 @@
   (let* ((vf (gethash (implementation) *virtual-frame-map*))
          (frame (search-next-frame vf (virtual-frame-current vf))))
     (when frame
-      (switch-current-frame vf frame))
-    (lem::change-display-size-hook)))
+      (switch-current-frame vf frame))))
 
 (defun enable-frame-multiplexer ()
   (setf (variable-value 'frame-multiplexer :global) t))

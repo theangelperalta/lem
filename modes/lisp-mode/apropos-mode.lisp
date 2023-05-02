@@ -1,7 +1,7 @@
 (in-package :lem-lisp-mode)
 
 (define-major-mode lisp-apropos-mode lisp-mode
-    (:name "lisp-apropos"
+    (:name "Apropos"
      :keymap *lisp-apropos-mode-keymap*
      :syntax-table lem-lisp-syntax:*syntax-table*)
   (setf (variable-value 'enable-syntax-highlight) nil))
@@ -11,7 +11,7 @@
 (define-key *lisp-mode-keymap* "C-c C-d p" 'lisp-apropos-package)
 
 (define-attribute apropos-headline-attribute
-  (t :bold-p t))
+  (t :bold t))
 
 (define-key *lisp-apropos-mode-keymap* "q" 'quit-active-window)
 (define-key *lisp-apropos-mode-keymap* "Return" 'lem/language-mode::find-definitions)

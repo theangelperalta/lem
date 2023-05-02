@@ -175,3 +175,28 @@ redraw-display関数でキャッシュを捨てて画面全体を再描画しま
 (defun max-window-height (frame)
   (- (display-height)
      (topleft-window-y frame)))
+
+
+(defun within-window-p (window x y)
+  (and (<= (window-x window) x (+ (window-x window) (window-width window) -1))
+       (<= (window-y window) y (+ (window-y window) (window-height window) -1))))
+
+(defun focus-window-position (frame x y)
+  (dolist (window (append (frame-header-windows frame)
+                          ;; リストの後ろにあるウィンドウほど手前に出てくるという前提
+                          (reverse (frame-floating-windows frame))
+                          (window-list frame)))
+    (when (within-window-p window x y)
+      (return (values window
+                      (- x (window-x window))
+                      (- y (window-y window)))))))
+
+(defun focus-separator-position (frame x y)
+  (dolist (window (window-list frame))
+    (when (and (= x (1- (window-x window)))
+               (<= (window-y window) y (+ (window-y window) (window-height window) -1)))
+      (return (values :vertical (left-window window) window)))
+    (when (and (window-use-modeline-p window)
+               (<= (window-x window) x (+ (window-x window) (window-width window) -1))
+               (= y (+ (window-y window) (window-height window) -1)))
+      (return (values :horizontal (down-window window) window)))))

@@ -34,13 +34,14 @@
 
 (defvar *yaml-syntax-table*
   (let ((table (make-syntax-table
+                :symbol-chars '(#\-)
                 :string-quote-chars '(#\" #\')))
         (tmlanguage (make-tmlanguage-yaml)))
     (set-syntax-parser table tmlanguage)
     table))
 
 (define-major-mode yaml-mode language-mode
-    (:name "yaml"
+    (:name "Yaml"
      :keymap *yaml-mode-keymap*
      :syntax-table *yaml-syntax-table*
      :mode-hook *yaml-mode-hook*)

@@ -28,8 +28,8 @@
 (in-package :lem/listener-mode)
 
 (define-attribute listener-prompt-attribute
-  (:light :foreground "blue" :bold-p t)
-  (:dark :foreground "cyan" :bold-p t))
+  (:light :foreground "blue" :bold t)
+  (:dark :foreground "cyan" :bold t))
 
 (define-editor-variable listener-prompt-attribute 'listener-prompt-attribute)
 
@@ -50,7 +50,7 @@
 (define-editor-variable listener-execute-function)
 
 (define-minor-mode listener-mode
-    (:name "listener"
+    (:name "Listener"
      :keymap *listener-mode-keymap*))
 
 (define-key *listener-mode-keymap* "Return" 'listener-return)

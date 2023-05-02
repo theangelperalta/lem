@@ -3,13 +3,13 @@
 (define-attribute topline-attribute)
 
 (define-attribute condition-attribute
-  (t :foreground "red" :bold-p t))
+  (t :foreground "red" :bold t))
 
 (define-attribute section-attribute
   (t :background "gray" :foreground "black"))
 
 (define-attribute restart-number-attribute
-  (t :bold-p t))
+  (t :bold t))
 
 (define-attribute restart-type-attribute
   (t :foreground "purple"))
@@ -29,7 +29,7 @@
   (t :foreground "green"))
 
 (define-major-mode sldb-mode lisp-ui-mode
-    (:name "sldb"
+    (:name "SLDB"
      :keymap *sldb-keymap*))
 
 (define-key *sldb-keymap* "n" 'sldb-down)

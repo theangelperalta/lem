@@ -235,6 +235,7 @@
    :skip-whitespace-backward
    :skip-symbol-forward
    :skip-symbol-backward
+   :symbol-region-at-point
    :symbol-string-at-point
    :make-pps-state
    :pps-state-type
@@ -308,6 +309,8 @@
    :back-to-indentation
    :indent-tabs-mode
    :calc-indent-function
+   :indent-when-yank
    :indent-line
    :indent-points
-   :indent-buffer))
+   :indent-buffer
+   :insert-string-and-indent))

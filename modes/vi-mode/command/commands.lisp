@@ -495,9 +495,15 @@
                            (copy-region start end)))))))
                (move-point (current-point) start)))))))
 
+(defun vi-yank-from-clipboard-or-killring ()
+(multiple-value-bind(str options) (lem::peek-killring-item (lem::current-killring) 0)
+  (if str
+    (values str options) 
+    (and (lem::enable-clipboard-p) (lem::get-clipboard-data)))))
+
 (define-command vi-paste-after () ()
   (multiple-value-bind (string type)
-      (lem::yank-from-clipboard-or-killring)
+      (vi-yank-from-clipboard-or-killring)
     (cond
       ((visual-p)
        (let ((visual-line (visual-line-p)))
@@ -521,7 +527,7 @@
 
 (define-command vi-paste-before () ()
   (multiple-value-bind (string type)
-      (lem::yank-from-clipboard-or-killring)
+      (vi-yank-from-clipboard-or-killring)
     (cond
       ((visual-p)
        (vi-delete)

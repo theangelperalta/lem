@@ -1,12 +1,13 @@
-(defpackage :lem-vi-mode.commands
+(defpackage :lem-vi-mode/commands
   (:use :cl
         :lem
         :lem/universal-argument
         :lem/show-paren
-        :lem-vi-mode.core
-        :lem-vi-mode.word
-        :lem-vi-mode.visual
-        :lem-vi-mode.jump-motions)
+        :lem-vi-mode/core
+        :lem-vi-mode/word
+        :lem-vi-mode/state/visual
+        :lem-vi-mode/state/insert
+        :lem-vi-mode/jump-motions)
   (:export :vi-move-to-beginning-of-line/universal-argument-0
            :vi-forward-char
            :vi-backward-char
@@ -33,8 +34,8 @@
            :vi-delete-previous-char
            :vi-delete
            :vi-delete-line
-           :vi-clear
-           :vi-clear-line
+           :vi-change
+           :vi-change-line
            :vi-join
            :vi-join-line
            :vi-yank
@@ -72,10 +73,10 @@
            :vi-jump-next
            :vi-normal
            :vi-keyboard-quit))
-(in-package :lem-vi-mode.commands)
+(in-package :lem-vi-mode/commands)
 
 (defvar *cursor-offset* -1)
-(defvar *vi-clear-recursive* nil)
+(defvar *vi-change-recursive* nil)
 (defvar *vi-delete-recursive* nil)
 (defvar *vi-yank-recursive* nil)
 
@@ -111,11 +112,27 @@
 
 ;; Vim word
 ;; See http://vimdoc.sourceforge.net/htmldoc/motion.html#word
-;; word = a sequence of letters, digits and underscores
+;; word = a sequence of letters, digits, underscores, or a 
+;; sequence of other non-blank characters.
 (defun vi-word-char-p (char)
   (and (characterp char)
        (or (alphanumericp char)
-           (char= char #\_))))
+           (char= char #\_)
+           ;; TODO: Add mechanism to modify
+           ;; these based on isKeyword
+           ;; which is modified based on file extension.
+           (char= char #\*)
+           (char= char #\/)
+           (char= char #\%)
+           (char= char #\<)
+           (char= char #\=)
+           (char= char #\>)
+           (char= char #\:)
+           (char= char #\$)
+           (char= char #\?)
+           (char= char #\!)
+           (char= char #\^)
+           (char= char #\-))))
 
 (defun vi-space-char-p (char)
   (and (characterp char)
@@ -200,10 +217,11 @@
     (line-offset (current-point) 1)
     (line-start (current-point)))
   (%vi-forward-word-begin n)
+  (unless *vi-change-recursive* 
   (if (or *vi-delete-recursive*
           *vi-yank-recursive*)
       (skip-chars-forward (current-point) '(#\Space #\Tab))
-      (skip-chars-forward (current-point) '(#\Space #\Tab #\Newline))))
+      (skip-chars-forward (current-point) '(#\Space #\Tab #\Newline)))))
 
 (define-command vi-backward-word-begin (&optional (n 1)) ("p")
   (when (< 0 n)
@@ -237,7 +255,7 @@
                                             (vi-space-char-p char))))
   (%vi-forward-word-begin n)
   (unless (or *vi-delete-recursive*
-              *vi-clear-recursive*)
+              *vi-change-recursive*)
     (vi-backward-char)))
 
 (define-command vi-forward-word-end-broad (&optional (n 1)) ("p")
@@ -289,7 +307,7 @@
 
 (defvar *vi-indent-recursive* nil)
 (let ((tag (gensym)))
-  (define-command vi-indent (&optional (n 1)) ("p")
+  (define-vi-operator vi-indent (&optional (n 1)) ("p")
     (cond (*vi-indent-recursive*
            (indent-line (current-point))
            (throw tag t))
@@ -310,11 +328,11 @@
                        (rotatef start end))
                      (indent-points start end))))))))))
 
-(define-command vi-substitute (&optional (n 1)) ("p")
+(define-vi-operator vi-substitute (&optional (n 1)) ("p")
   (vi-delete-next-char n)
   (change-state 'insert))
 
-(define-command vi-delete-next-char (&optional (n 1)) ("p")
+(define-vi-operator vi-delete-next-char (&optional (n 1)) ("p")
   (cond
     ((visual-p)
      (vi-delete))
@@ -323,12 +341,12 @@
        (delete-next-char n)
        (fall-within-line (current-point))))))
 
-(define-command vi-delete-previous-char (&optional (n 1)) ("p")
+(define-vi-operator vi-delete-previous-char (&optional (n 1)) ("p")
   (unless (bolp (current-point))
     (delete-previous-char n)))
 
 (let ((tag (gensym)))
-  (define-command vi-delete (&optional (n 1)) ("p")
+  (define-vi-operator vi-delete (&optional (n 1)) ("p")
     (cond (*vi-delete-recursive*
            ;; TODO: universal argument
            (with-point ((start (line-start (current-point)))
@@ -338,9 +356,9 @@
                  (kill-region start end))
                (if eob
                    (unless (or (first-line-p (current-point))
-                               *vi-clear-recursive*)
+                               *vi-change-recursive*)
                      (delete-previous-char))
-                   (when *vi-clear-recursive*
+                   (when *vi-change-recursive*
                      (insert-character (current-point) #\Newline)
                      (vi-previous-line)))))
            (throw tag t))
@@ -383,10 +401,10 @@
                              (character-offset end 1))
                            (with-killring-context (:options (when multiline :vi-line))
                              (kill-region start end))))))))
-               (unless *vi-clear-recursive*
+               (unless *vi-change-recursive*
                  (fall-within-line (current-point)))))))))
 
-(define-command vi-delete-line () ()
+(define-vi-operator vi-delete-line () ()
   (cond ((visual-block-p)
          (apply-visual-range (lambda (start end)
                                (kill-region start (line-end end)))))
@@ -397,16 +415,16 @@
          (with-point ((start (current-point))
                       (end (current-point)))
            (kill-region start (line-end end)))
-         (unless *vi-clear-recursive*
+         (unless *vi-change-recursive*
            (fall-within-line (current-point))))))
 
-(define-command vi-clear () ()
-  (let ((*vi-clear-recursive* t))
+(define-vi-operator vi-change () ()
+  (let ((*vi-change-recursive* t))
     (vi-delete))
   (vi-insert))
 
-(define-command vi-clear-line () ()
-  (let ((*vi-clear-recursive* t))
+(define-vi-operator vi-change-line () ()
+  (let ((*vi-change-recursive* t))
     (vi-delete-line))
   (vi-insert))
 
@@ -428,7 +446,7 @@
          (insert-character p #\space)))))
 
 (let ((tag (gensym)))
-  (define-command vi-yank (&optional (n 1)) ("p")
+  (define-vi-operator vi-yank (&optional (n 1)) ("p")
     (cond (*vi-yank-recursive*
            ;; TODO: universal argument
            (with-point ((start (current-point))
@@ -477,9 +495,15 @@
                            (copy-region start end)))))))
                (move-point (current-point) start)))))))
 
+(defun vi-yank-from-clipboard-or-killring ()
+(multiple-value-bind(str options) (lem::peek-killring-item (lem::current-killring) 0)
+  (if str
+    (values str options) 
+    (and (lem::enable-clipboard-p) (lem::get-clipboard-data)))))
+
 (define-command vi-paste-after () ()
   (multiple-value-bind (string type)
-      (lem::yank-from-clipboard-or-killring)
+      (vi-yank-from-clipboard-or-killring)
     (cond
       ((visual-p)
        (let ((visual-line (visual-line-p)))
@@ -503,7 +527,7 @@
 
 (define-command vi-paste-before () ()
   (multiple-value-bind (string type)
-      (lem::yank-from-clipboard-or-killring)
+      (vi-yank-from-clipboard-or-killring)
     (cond
       ((visual-p)
        (vi-delete)
@@ -516,7 +540,7 @@
          (line-start (current-point)))
        (yank)))))
 
-(define-command vi-replace-char (c)
+(define-vi-operator vi-replace-char (c)
     ((key-to-char (read-key)))
   (cond
     ((visual-p)
@@ -655,7 +679,7 @@
   (vi-quit nil))
 
 (define-command vi-end-insert () ()
-  (change-state 'command)
+  (change-state 'normal)
   (vi-backward-char 1))
 
 (define-command vi-insert () ()
@@ -702,7 +726,7 @@
     (jump-next)))
 
 (define-command vi-normal () ()
-  (change-state 'command))
+  (change-state 'normal))
 
 (define-command vi-keyboard-quit () ()
   (when (eq (current-state) 'modeline)

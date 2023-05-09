@@ -5,7 +5,8 @@
            :completion-item
            :completion-item-label
            :completion-item-detail
-           :run-completion)
+           :run-completion
+           :completion-end)
   #+sbcl
   (:lock t))
 (in-package :lem/completion-mode)
@@ -129,26 +130,43 @@
                  (compute-label-width items)))
 
 (defmethod lem/popup-menu:apply-print-spec ((print-spec print-spec) point item)
-  (insert-string point " ")
-  (insert-string point (completion-item-label item))
-  (loop :for (offset-start . offset-end) :in (completion-item-chunks item)
-        :do (with-point ((start point) (end point))
-              (character-offset (line-start start) (1+ offset-start))
-              (character-offset (line-start end) (1+ offset-end))
-              (put-text-property start end :attribute 'chunk-attribute)))
-  (move-to-column point (label-width print-spec) t)
-  (line-end point)
-  (insert-string point "  ")
-  (unless (alexandria:emptyp (completion-item-detail item))
-    (insert-string point (completion-item-detail item)
-                   :attribute 'detail-attribute)
-    (insert-string point " ")))
+  (with-point ((start point))
+    (insert-string point " ")
+    (insert-string point (completion-item-label item))
+    (loop :for (offset-start . offset-end) :in (completion-item-chunks item)
+          :do (with-point ((start point) (end point))
+                (character-offset (line-start start) (1+ offset-start))
+                (character-offset (line-start end) (1+ offset-end))
+                (put-text-property start end :attribute 'chunk-attribute)))
+    (move-to-column point (label-width print-spec) t)
+    (line-end point)
+    (insert-string point "  ")
+    (unless (alexandria:emptyp (completion-item-detail item))
+      (insert-string point (completion-item-detail item)
+                     :attribute 'detail-attribute)
+      (insert-string point " "))
+    (put-text-property start
+                       point
+                       :click-callback (lambda (window dest-point)
+                                         (declare (ignore window dest-point))
+                                         (completion-select)))
+    (let ((context *completion-context*))
+      (put-text-property start
+                         point
+                         :hover-callback (lambda (window dest-point)
+                                           (declare (ignore window))
+                                           (lem/popup-menu::move-focus
+                                            (context-popup-menu context)
+                                            (lambda (point)
+                                              (move-point point dest-point))))))))
 
 (defun completion-end ()
-  (completion-mode nil)
-  (alexandria:when-let (popup-menu (context-popup-menu *completion-context*))
-    (popup-menu-quit popup-menu))
-  (setf (context-popup-menu *completion-context*) nil))
+  (when *completion-context*
+    (completion-mode nil)
+    (alexandria:when-let (popup-menu (context-popup-menu *completion-context*))
+      (popup-menu-quit popup-menu))
+    (setf (context-popup-menu *completion-context*) nil)
+    (setf *completion-context* nil)))
 
 (defun call-focus-action ()
   (alexandria:when-let* ((menu (context-popup-menu *completion-context*))

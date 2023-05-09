@@ -25,6 +25,8 @@
 (define-key *command-keymap* "C-r" 'vi-redo)
 (define-key *command-keymap* "C-f" 'next-page)
 (define-key *command-keymap* "C-b" 'previous-page)
+(define-key *command-keymap* "C-d" 'next-page)
+(define-key *command-keymap* "C-u" 'previous-page)
 
 ;; Commands keys = ['v'];
 (define-key *command-keymap* "v" 'vi-visual-char)

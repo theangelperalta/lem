@@ -4,8 +4,22 @@
         :lem-sdl2/font
         :lem-sdl2/icon
         :lem-sdl2/platform)
-  (:export :change-font))
+  (:export :change-font
+           :set-keyboard-layout
+           :render
+           :current-renderer)
+  (:export :draw-line
+           :draw-rectangle
+           :draw-point
+           :draw-points
+           :draw-string
+           :load-image
+           :delete-image
+           :draw-image
+           :delete-drawable))
 (in-package :lem-sdl2)
+
+(pushnew :lem-sdl2 *features*)
 
 (defconstant +display-width+ 100)
 (defconstant +display-height+ 40)
@@ -89,6 +103,9 @@
 (defmethod display-emoji-font ((display display))
   (font-emoji-font (display-font display)))
 
+(defmethod display-braille-font ((display display))
+  (font-braille-font (display-font display)))
+
 (defmethod display-background-color ((display display))
   (or (lem:parse-color lem-if:*background-color-of-drawing-window*)
       (slot-value display 'background-color)))
@@ -109,17 +126,42 @@
   (set-render-color display (display-background-color display))
   (sdl2:render-fill-rect (display-renderer display) nil))
 
-(defmethod get-display-font ((display display) &key type bold)
-  (check-type type (member :latin :cjk :emoji))
-  (if (eq type :emoji)
-      (display-emoji-font display)
-      (if bold
-          (if (eq type :latin)
-              (display-latin-bold-font display)
-              (display-cjk-bold-font display))
-          (if (eq type :latin)
-              (display-latin-font display)
-              (display-cjk-normal-font display)))))
+(defvar *font-cache* (make-hash-table :test 'eql))
+
+(defun clear-font-cache ()
+  (clrhash *font-cache*))
+
+(defun icon-font-name (character)
+  (lem:icon-value (char-code character) :font))
+
+(defun icon-font (character)
+  (or (gethash character *font-cache*)
+      (let ((font-name (icon-font-name character)))
+        (when font-name
+          (let ((pathname (asdf:system-relative-pathname
+                           :lem-sdl2
+                           (merge-pathnames font-name "resources/fonts/"))))
+            (setf (gethash character *font-cache*)
+                  (sdl2-ttf:open-font pathname
+                                      (font-config-size (display-font-config *display*)))))))))
+
+(defmethod get-display-font ((display display) &key type bold character)
+  (check-type type (member :latin :cjk :braille :emoji :icon))
+  (cond ((eq type :icon)
+         (or (and character (icon-font character))
+             (display-emoji-font display)))
+        ((eq type :emoji)
+         (display-emoji-font display))
+        ((eq type :braille)
+         (display-braille-font display))
+        (bold
+         (if (eq type :latin)
+             (display-latin-bold-font display)
+             (display-cjk-bold-font display)))
+        (t
+         (if (eq type :latin)
+             (display-latin-font display)
+             (display-cjk-normal-font display)))))
 
 (defmethod update-display ((display display))
   (sdl2:render-present (display-renderer display)))
@@ -138,6 +180,13 @@
                           (display-width display)
                           (display-height display)))))
 
+(defmethod set-render-color ((display display) color)
+  (sdl2:set-render-draw-color (display-renderer display)
+                              (lem:color-red color)
+                              (lem:color-green color)
+                              (lem:color-blue color)
+                              0))
+
 (defun notify-required-redisplay ()
   (with-renderer ()
     (when (display-redraw-at-least-once-p *display*)
@@ -145,13 +194,6 @@
       (set-render-color *display* (display-background-color *display*))
       (sdl2:render-clear (current-renderer))
       (lem::change-display-size-hook))))
-
-(defmethod set-render-color ((display display) color)
-  (sdl2:set-render-draw-color (display-renderer display)
-                              (lem:color-red color)
-                              (lem:color-green color)
-                              (lem:color-blue color)
-                              0))
 
 (defun attribute-foreground-color (attribute)
   (or (and attribute
@@ -191,39 +233,105 @@
 
 (defun cjk-char-code-p (display code)
   (and (typep code '(UNSIGNED-BYTE 16))
-       (sdl2-ffi.functions:ttf-glyph-is-provided (display-cjk-normal-font display) code)))
+       (not (eql 0
+                 (sdl2-ffi.functions:ttf-glyph-is-provided (display-cjk-normal-font display)
+                                                           code)))))
+
+(defun latin-char-code-p (display code)
+  (and (typep code '(UNSIGNED-BYTE 16))
+       (not (eql 0
+                 (sdl2-ffi.functions:ttf-glyph-is-provided (display-latin-font display)
+                                                           code)))))
+
+(defun emoji-char-code-p (display code)
+  (and (typep code '(UNSIGNED-BYTE 16))
+       (not (eql 0 (sdl2-ffi.functions:ttf-glyph-is-provided (display-emoji-font display) code)))))
+
+(defun braille-char-code-p (code)
+  (<= #x2800 code #x28ff))
+
+(defun icon-char-code-p (code)
+  (icon-font-name (code-char code)))
+
+(defun render-icon (character x y &key color)
+  (cffi:with-foreign-string (c-string (string character))
+    (let* ((x (* x (char-width)))
+           (y (* y (char-height)))
+           (surface (sdl2-ttf:render-utf8-blended
+                     (get-display-font *display*
+                                       :type :icon
+                                       :character character)
+                     c-string
+                     (lem:color-red color)
+                     (lem:color-green color)
+                     (lem:color-blue color)
+                     0))
+           (text-width (sdl2:surface-width surface))
+           (text-height (sdl2:surface-height surface))
+           (texture (sdl2:create-texture-from-surface (current-renderer) surface))
+           (offset-x (lem:icon-value (char-code character) :offset-x)))
+      (render-texture (current-renderer)
+                      texture
+                      (if offset-x
+                          (floor (+ x (* text-width offset-x)))
+                          x)
+                      y
+                      text-width
+                      text-height)
+      (sdl2:destroy-texture texture)
+      2)))
+
+(defun guess-font-type (display code)
+  (cond ((<= code 128)
+         :latin)
+        ((icon-char-code-p code)
+         :icon)
+        ((braille-char-code-p code)
+         :braille)
+        ((cjk-char-code-p display code)
+         :cjk)
+        ((latin-char-code-p display code)
+         :latin)
+        ((emoji-char-code-p display code)
+         :emoji)
+        (t
+         :emoji)))
 
 (defun render-character (character x y &key color bold)
   (handler-case
       (let* ((code (char-code character))
-             (type (cond ((<= code 128)
-                          :latin)
-                         ((cjk-char-code-p *display* code)
-                          :cjk)
-                         (t
-                          :emoji))))
-        (cffi:with-foreign-string (c-string (string character))
-          (let* ((x (* x (char-width)))
-                 (y (* y (char-height)))
-                 (surface (sdl2-ttf:render-utf8-blended
-                           (get-display-font *display*
-                                             :type type
-                                             :bold bold)
-                           c-string
-                           (lem:color-red color)
-                           (lem:color-green color)
-                           (lem:color-blue color)
-                           0))
-                 (text-width (if (eq type :emoji)
-                                 (* 2 (char-width))
-                                 (sdl2:surface-width surface)))
-                 (text-height (if (eq type :emoji)
-                                  (char-height)
-                                  (sdl2:surface-height surface)))
-                 (texture (sdl2:create-texture-from-surface (current-renderer) surface)))
-            (render-texture (current-renderer) texture x y text-width text-height)
-            (sdl2:destroy-texture texture)
-            (if (eq type :latin) 1 2))))
+             (type (guess-font-type *display* code)))
+        (if (eq type :icon)
+            (render-icon character x y :color color)
+            (cffi:with-foreign-string (c-string (string character))
+              (let* ((x (* x (char-width)))
+                     (y (* y (char-height)))
+                     (surface (sdl2-ttf:render-utf8-blended
+                               (get-display-font *display*
+                                                 :type type
+                                                 :bold bold
+                                                 :character character)
+                               c-string
+                               (lem:color-red color)
+                               (lem:color-green color)
+                               (lem:color-blue color)
+                               0))
+                     (text-width (cond ((eq type :emoji)
+                                        (* 2 (char-width)))
+                                       ((eq type :braille)
+                                         (char-width))
+                                       (t
+                                        (sdl2:surface-width surface))))
+                     (text-height (cond ((eq type :emoji)
+                                         (char-height))
+                                        ((eq type :braille)
+                                         (char-height))
+                                        (t
+                                         (sdl2:surface-height surface))))
+                     (texture (sdl2:create-texture-from-surface (current-renderer) surface)))
+                (render-texture (current-renderer) texture x y text-width text-height)
+                (sdl2:destroy-texture texture)
+                (if (member type '(:latin :braille)) 1 2)))))
     (sdl2-ttf::sdl-ttf-error ()
       (log:error "invalid character" character)
       1)))
@@ -240,7 +348,13 @@
                                                   0))
            (height (sdl2:surface-height surface))
            (texture (sdl2:create-texture-from-surface (current-renderer) surface)))
-      (render-texture (current-renderer) texture x y (* (display-char-width *display*) (length string)) height)
+      (render-texture (current-renderer)
+                      texture
+                      x
+                      y
+                      (* (display-char-width *display*)
+                         (length string))
+                      height)
       (sdl2:destroy-texture texture)
       (length string))))
 
@@ -348,6 +462,7 @@
       (setf (display-font-config *display*) font-config)
       (setf (display-font *display*) font))
     (save-font-size font-config)
+    (clear-font-cache)
     (lem:send-event :resize)))
 
 (defun create-view-texture (width height)
@@ -567,6 +682,12 @@
     (:windowevent (:event event)
      (on-windowevent event))))
 
+(defun init-application-icon (window)
+  (let ((image (sdl2-image:load-image
+                (asdf:system-relative-pathname :lem-sdl2 "resources/icon.png"))))
+    (sdl2-ffi.functions:sdl-set-window-icon window image)
+    (sdl2:free-surface image)))
+
 (defun create-display (function)
   (sdl2:with-init (:video)
     (sdl2-ttf:init)
@@ -613,11 +734,13 @@
                                                       (lambda ())
                                                       ;; finalize
                                                       (lambda (report)
-                                                        (declare (ignore report))
+                                                        (log:info "~A" report)
                                                         (sdl2:push-quit-event)))))
                                        (declare (ignore editor-thread))
                                        nil)))))))
-    (bt:join-thread thread)))
+    (bt:join-thread thread)
+    #+darwin
+    (cffi:foreign-funcall "_exit")))
 
 (defmethod lem-if:get-background-color ((implementation sdl2))
   (with-debug ("lem-if:get-background-color")
@@ -693,22 +816,31 @@
     (with-renderer ()
       (render-border-using-view view))))
 
+(defun render-view-texture-to-display (view)
+  (sdl2:set-render-target (current-renderer) (display-texture *display*))
+  (sdl2:with-rects ((dest-rect (* (view-x view) (char-width))
+                               (* (view-y view) (char-height))
+                               (* (view-width view) (char-width))
+                               (* (view-height view) (char-height))))
+    (sdl2:render-copy (current-renderer)
+                      (view-texture view)
+                      :dest-rect dest-rect)))
+
+(defgeneric render (texture window buffer))
+
 (defmethod lem-if:redraw-view-after ((implementation sdl2) view)
   (with-debug ("lem-if:redraw-view-after" view)
     (with-renderer ()
-      (sdl2:set-render-target (current-renderer) (display-texture *display*))
-      (sdl2:with-rects ((dest-rect (* (view-x view) (char-width))
-                                   (* (view-y view) (char-height))
+      (sdl2:with-rects ((view-rect 0
+                                   0
                                    (* (view-width view) (char-width))
-                                   (* (view-height view) (char-height)))
-                        (src-rect 0
-                                  0
-                                  (* (view-width view) (char-width))
-                                  (* (view-height view) (char-height))))
-        (sdl2:render-copy (current-renderer)
-                          (view-texture view)
-                          :dest-rect dest-rect
-                          :source-rect src-rect)))))
+                                   (* (1- (view-height view)) (char-height))))
+        (sdl2:render-set-viewport (current-renderer) view-rect)
+        (render (view-texture view)
+                (view-window view)
+                (lem:window-buffer (view-window view)))
+        (sdl2:render-set-viewport (current-renderer) nil))
+      (render-view-texture-to-display view))))
 
 (defmethod lem-if::will-update-display ((implementation sdl2))
   (with-debug ("will-update-display")
@@ -795,4 +927,198 @@
         (values (floor x (display-char-width *display*))
                 (floor y (display-char-height *display*))))))
 
-(pushnew :lem-sdl2 *features*)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defclass drawable ()
+  ((target :initarg :target
+           :reader drawable-target)
+   (draw-function :initarg :draw-function
+                  :reader drawable-draw-function)
+   (targets :initform '()
+            :accessor drawable-targets)))
+
+(defun buffer-drawables (buffer)
+  (lem:buffer-value buffer 'drawables))
+
+(defun (setf buffer-drawables) (drawables buffer)
+  (setf (lem:buffer-value buffer 'drawables) drawables))
+
+(defun window-drawables (window)
+  (lem:window-parameter window 'drawables))
+
+(defun (setf window-drawables) (drawables window)
+  (setf (lem:window-parameter window 'drawables) drawables))
+
+(defmethod drawables ((target lem:window))
+  (window-drawables target))
+
+(defmethod drawables ((target lem:buffer))
+  (buffer-drawables target))
+
+(defmethod (setf drawables) (drawables (target lem:window))
+  (setf (window-drawables target) drawables))
+
+(defmethod (setf drawables) (drawables (target lem:buffer))
+  (setf (buffer-drawables target) drawables))
+
+(defmethod add-drawable ((target lem:window) drawable)
+  (push target (drawable-targets drawable))
+  (push drawable (lem:window-parameter target 'drawables)))
+
+(defmethod add-drawable ((target lem:buffer) drawable)
+  (push target (drawable-targets drawable))
+  (push drawable (lem:buffer-value target 'drawables)))
+
+(defun delete-drawable (drawable)
+  (dolist (target (drawable-targets drawable))
+    (alexandria:deletef (drawables target) drawable)))
+
+(defun clear-drawables (target)
+  (mapc #'delete-drawable (drawables target))
+  (values))
+
+(defmethod render (texture window buffer)
+  (dolist (drawable (window-drawables window))
+    (funcall (drawable-draw-function drawable)))
+  (dolist (drawable (buffer-drawables buffer))
+    (funcall (drawable-draw-function drawable))))
+
+(defun call-with-drawable (target draw-function)
+  (let ((drawable
+          (make-instance 'drawable
+                         :target target
+                         :draw-function draw-function)))
+    (add-drawable target drawable)
+    drawable))
+
+(defmacro with-drawable ((target) &body body)
+  `(call-with-drawable ,target (lambda () ,@body)))
+
+(defun set-color (color)
+  (when color
+    (set-render-color *display* color)))
+
+(defun draw-line (target x1 y1 x2 y2 &key color)
+  (with-drawable (target)
+    (set-color color)
+    (sdl2:render-draw-line (current-renderer)
+                           x1
+                           y1
+                           x2
+                           y2)))
+
+(defun draw-rectangle (target x y width height &key filled color)
+  (with-drawable (target)
+    (set-color color)
+    (sdl2:with-rects ((rect x y width height))
+      (if filled
+          (sdl2:render-fill-rect (current-renderer) rect)
+          (sdl2:render-draw-rect (current-renderer) rect)))))
+
+(defun draw-point (target x y &key color)
+  (with-drawable (target)
+    (set-color color)
+    (sdl2:render-draw-point (current-renderer) x y)))
+
+(defun convert-to-points (x-y-seq)
+  (let ((num-points (length x-y-seq)))
+    (plus-c:c-let ((c-points sdl2-ffi:sdl-point :count num-points))
+      (etypecase x-y-seq
+        (vector
+         (loop :for i :from 0
+               :for (x . y) :across x-y-seq
+               :do (let ((dest-point (c-points i)))
+                     (sdl2::c-point (dest-point)
+                       (setf (dest-point :x) x
+                             (dest-point :y) y))))))
+      (values (c-points plus-c:&)
+              num-points))))
+
+(defun draw-points (target x-y-seq &key color)
+  (multiple-value-bind (points num-points)
+      (convert-to-points x-y-seq)
+    (with-drawable (target)
+      (set-color color)
+      (sdl2:render-draw-points (current-renderer)
+                               points
+                               num-points))))
+
+(defun draw-string (target string x y
+                    &key (font (font-latin-normal-font (display-font *display*)))
+                         color)
+  (let* ((surface (sdl2-ttf:render-utf8-blended font
+                                                string
+                                                (lem:color-red color)
+                                                (lem:color-green color)
+                                                (lem:color-blue color)
+                                                0)))
+    (with-drawable (target)
+      (let ((texture (sdl2:create-texture-from-surface (current-renderer) surface)))
+        (sdl2:with-rects ((dest-rect x
+                                     y
+                                     (sdl2:surface-width surface)
+                                     (sdl2:surface-height surface)))
+          (sdl2:render-copy (current-renderer) texture :dest-rect dest-rect))
+        (sdl2:destroy-texture texture)))))
+
+(defclass image ()
+  ((texture :initarg :texture
+            :reader image-texture
+            :writer set-image-texture)
+   (width :initarg :width
+          :reader image-width)
+   (height :initarg :height
+           :reader image-height)))
+
+(defun load-image (pathname)
+  (let ((image (sdl2-image:load-image pathname)))
+    (make-instance 'image
+                   :width (sdl2:surface-width image)
+                   :height (sdl2:surface-height image)
+                   :texture (sdl2:create-texture-from-surface (current-renderer)
+                                                              image))))
+
+(defun delete-image (image)
+  (sdl2:destroy-texture (image-texture image))
+  (set-image-texture nil image))
+
+(defun draw-image (target image
+                   &key (x 0)
+                        (y 0)
+                        (width (image-width image))
+                        (height (image-height image))
+                        clip-rect)
+  (with-drawable (target)
+    (sdl2:with-rects ((dest-rect x y width height))
+      (let ((source-rect
+              (when clip-rect
+                (destructuring-bind (x y w h) clip-rect
+                  (sdl2:make-rect x y w h)))))
+        (unwind-protect
+             (sdl2:render-copy (current-renderer)
+                               (image-texture image)
+                               :source-rect source-rect
+                               :dest-rect dest-rect)
+          (when source-rect
+            (sdl2:free-rect source-rect)))))))
+
+;;;
+(defclass sdl2-find-file-executor (lem::find-file-executor) ())
+
+(defmethod lem:execute-find-file ((executor sdl2-find-file-executor) mode pathname)
+  (cond ((member (pathname-type pathname)
+                 '("png" "jpg" "jpeg" "bmp" "gif")
+                 :test #'equal)
+         (open-image-buffer pathname))
+        (t
+         (call-next-method))))
+
+(setf lem::*find-file-executor* (make-instance 'sdl2-find-file-executor))
+
+;;;
+(defun open-image-buffer (pathname)
+  (let ((image (load-image pathname))
+        (buffer (lem:make-buffer (file-namestring pathname))))
+    (draw-image buffer image :x 0 :y 0)
+    (setf (lem:buffer-read-only-p buffer) t)
+    (lem:switch-to-buffer buffer)))

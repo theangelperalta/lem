@@ -12,7 +12,14 @@
    :find-tree
    :do-sequence
    :if-push)
-  ;; string-width-utils
+  ;; icon.lisp
+  (:export :register-icon
+           :register-icon-ext
+           :icon-code-p
+           :icon-string
+           :icon-string-by-ext
+           :icon-value)
+  ;; string-width-utils.lisp
   (:export :+default-tab-size+
            :control-char
            :wide-char-p
@@ -71,6 +78,7 @@
    :current-buffer
    :make-buffer
    :buffer
+   :text-buffer
    :bufferp
    :buffer-start-point
    :buffer-end-point
@@ -298,6 +306,7 @@
    :*external-format-function*
    :*find-directory-function*
    :*default-external-format*
+   :encoding-read-error
    :insert-file-contents
    :find-file-buffer
    :write-to-file

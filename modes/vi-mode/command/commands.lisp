@@ -349,6 +349,7 @@
   (define-vi-operator vi-delete (&optional (n 1)) ("p")
     (cond (*vi-delete-recursive*
            ;; TODO: universal argument
+           ;; use iterative solution
            (with-point ((start (line-start (current-point)))
                         (end (line-end (current-point))))
              (let ((eob (not (character-offset end 1))))
@@ -449,6 +450,7 @@
   (define-vi-operator vi-yank (&optional (n 1)) ("p")
     (cond (*vi-yank-recursive*
            ;; TODO: universal argument
+           ;; user iterative solution
            (with-point ((start (current-point))
                         (end (current-point)))
              (line-start start)

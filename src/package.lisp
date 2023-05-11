@@ -15,6 +15,10 @@
    :remove-command
    :find-command
    :exist-command-p)
+  ;; killring.lisp
+  (:export
+    :copy-to-clipboard-with-killring
+    :yank-from-clipboard-or-killring)
   ;; quicklisp-utils.lisp
   (:export
    :maybe-quickload)
@@ -29,7 +33,8 @@
   ;; system.lisp
   (:export
    :get-pid
-   :exist-program-p)
+   :exist-program-p
+   :lem-relative-pathname)
   ;; key.lisp
   (:export
    :make-key

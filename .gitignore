@@ -26,3 +26,7 @@ lem-ncurses.desktop
 .DS_Store
 
 GIT_IGNORE.*
+
+lem
+lem-ncurses
+

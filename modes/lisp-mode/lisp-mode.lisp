@@ -99,7 +99,7 @@
 (defun remove-and-change-connection (connection)
   (remove-connection connection)
   (when (eq connection (current-connection))
-    (setf (current-connection) (first (connection-list))))
+    (change-current-connection (first (connection-list))))
   (values))
 
 (defvar *self-connected-port* nil)
@@ -1049,7 +1049,7 @@
 (defun completion-impls (string &optional (command-list (get-slime-command-list)))
   (completion-strings string command-list))
 
-(defun prompt-for-impl (&key (existing t))
+(defun prompt-for-implementation (&key (existing t))
   (let* ((default-impl (config :slime-lisp-implementation ""))
          (command-list (get-slime-command-list))
          (impl (prompt-for-string
@@ -1143,8 +1143,8 @@
                    (stop-loading-spinner spinner)))
           (setf timer (start-timer (make-timer #'interval) 500 t)))))))
 
-(define-command slime (&optional ask-impl) ("P")
-  (let ((command (if ask-impl (prompt-for-impl))))
+(define-command slime (&optional ask-implementation) ("P")
+  (let ((command (if ask-implementation (prompt-for-implementation))))
     (run-slime command)))
 
 (defun delete-lisp-connection (connection)
@@ -1153,7 +1153,8 @@
              (kill-buffer buffer))
            (lem-process:delete-process (connection-process connection))
            t)
-    (remove-and-change-connection connection)))
+    (remove-and-change-connection connection)
+    (usocket:socket-close (lem-lisp-mode/swank-protocol::connection-socket connection))))
 
 (define-command slime-quit () ()
   (when (self-connection-p (current-connection))

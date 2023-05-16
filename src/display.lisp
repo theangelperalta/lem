@@ -1,5 +1,7 @@
 (in-package :lem)
 
+(define-editor-variable highlight-line nil)
+
 (defvar *inactive-window-background-color* nil)
 
 (defun call-with-display-error (function)
@@ -109,6 +111,27 @@
                        (draw-line row start-charpos)))
             :while (line-offset point 1)))))
 
+(defun highlight-line-color ()
+  (let ((color (parse-color (background-color))))
+    (multiple-value-bind (h s v)
+        (rgb-to-hsv (color-red color)
+                    (color-green color)
+                    (color-blue color))
+      (multiple-value-bind (r g b)
+          (hsv-to-rgb h
+                      s
+                      (max 0 (- v 2)))
+        (format nil "#~X~X~X" r g b)))))
+
+(defun make-temporary-highlight-line-overlay ()
+  (when (and (variable-value 'highlight-line :default (current-buffer))
+             (current-theme))
+    (let ((ov (make-temporary-overlay (current-point)
+                                      (current-point)
+                                      (make-attribute :background (highlight-line-color)))))
+      (overlay-put ov :display-line t)
+      ov)))
+
 (defun make-temporary-region-overlay-from-cursor (cursor)
   (let ((mark (cursor-mark cursor)))
     (when (mark-active-p mark)
@@ -120,7 +143,8 @@
     (when (eq (current-window) window)
       (dolist (cursor (buffer-cursors buffer))
         (if-push (make-temporary-region-overlay-from-cursor cursor)
-                 overlays)))
+                 overlays))
+      (if-push (make-temporary-highlight-line-overlay) overlays))
     overlays))
 
 (defun draw-window-overlays-to-screen (window)

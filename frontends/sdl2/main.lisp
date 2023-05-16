@@ -21,6 +21,7 @@
 (in-package :lem-sdl2)
 
 (pushnew :lem-sdl2 *features*)
+(setf (lem:variable-value 'lem:highlight-line :global) t)
 
 (defconstant +display-width+ 100)
 (defconstant +display-height+ 40)
@@ -32,6 +33,13 @@
                             :collect `(cons ',var ,var))
                     bt:*default-special-bindings*)))
        ,@body)))
+
+(defun do-log (value)
+  (with-open-file (out "~/lem.log"
+                       :direction :output
+                       :if-exists :append
+                       :if-does-not-exist :create)
+    (uiop:println value out)))
 
 (defun call-with-debug (log-function body-function)
   (funcall log-function)
@@ -280,8 +288,26 @@
       (sdl2:destroy-texture texture)
       2)))
 
+(defun render-folder-icon (x y)
+  (let* ((image (sdl2-image:load-image (get-resource-pathname "resources/open-folder.png")))
+         (texture (sdl2:create-texture-from-surface (current-renderer)
+                                                    image)))
+    (sdl2:with-rects ((dest-rect (* x (char-width))
+                                 (* y (char-height))
+                                 (* 2 (char-width))
+                                 (floor (* (char-height) 0.9))))
+      (sdl2:render-copy (current-renderer)
+                        texture
+                        :dest-rect dest-rect))
+    (sdl2:free-surface image)
+    (sdl2:destroy-texture texture)))
+
 (defun guess-font-type (display code)
-  (cond ((<= code 128)
+  (cond #+windows
+        ((eql code #x1f4c1)
+         ;; sdl2_ttf.dllでなぜか絵文字を表示できないので代わりにフォルダの画像を使う
+         :folder)
+        ((<= code 128)
          :latin)
         ((icon-char-code-p code)
          :icon)
@@ -300,37 +326,42 @@
   (handler-case
       (let* ((code (char-code character))
              (type (guess-font-type *display* code)))
-        (if (eq type :icon)
-            (render-icon character x y :color color)
-            (cffi:with-foreign-string (c-string (string character))
-              (let* ((x (* x (char-width)))
-                     (y (* y (char-height)))
-                     (surface (sdl2-ttf:render-utf8-blended
-                               (get-display-font *display*
-                                                 :type type
-                                                 :bold bold
-                                                 :character character)
-                               c-string
-                               (lem:color-red color)
-                               (lem:color-green color)
-                               (lem:color-blue color)
-                               0))
-                     (text-width (cond ((eq type :emoji)
-                                        (* 2 (char-width)))
+        (case type
+          (:folder
+           (render-folder-icon x y)
+           2)
+          (:icon
+           (render-icon character x y :color color))
+          (otherwise
+           (cffi:with-foreign-string (c-string (string character))
+             (let* ((x (* x (char-width)))
+                    (y (* y (char-height)))
+                    (surface (sdl2-ttf:render-utf8-blended
+                              (get-display-font *display*
+                                                :type type
+                                                :bold bold
+                                                :character character)
+                              c-string
+                              (lem:color-red color)
+                              (lem:color-green color)
+                              (lem:color-blue color)
+                              0))
+                    (text-width (cond ((eq type :emoji)
+                                       (* 2 (char-width)))
+                                      ((eq type :braille)
+                                       (char-width))
+                                      (t
+                                       (sdl2:surface-width surface))))
+                    (text-height (cond ((eq type :emoji)
+                                        (char-height))
                                        ((eq type :braille)
-                                         (char-width))
+                                        (char-height))
                                        (t
-                                        (sdl2:surface-width surface))))
-                     (text-height (cond ((eq type :emoji)
-                                         (char-height))
-                                        ((eq type :braille)
-                                         (char-height))
-                                        (t
-                                         (sdl2:surface-height surface))))
-                     (texture (sdl2:create-texture-from-surface (current-renderer) surface)))
-                (render-texture (current-renderer) texture x y text-width text-height)
-                (sdl2:destroy-texture texture)
-                (if (member type '(:latin :braille)) 1 2)))))
+                                        (sdl2:surface-height surface))))
+                    (texture (sdl2:create-texture-from-surface (current-renderer) surface)))
+               (render-texture (current-renderer) texture x y text-width text-height)
+               (sdl2:destroy-texture texture)
+               (if (member type '(:latin :braille)) 1 2))))))
     (sdl2-ttf::sdl-ttf-error ()
       (log:error "invalid character" character)
       1)))
@@ -661,7 +692,10 @@
 
 (defun event-loop ()
   (sdl2:with-event-loop (:method :wait)
-    (:quit () t)
+    (:quit ()
+     #+windows
+     (cffi:foreign-funcall "_exit")
+     t)
     (:textinput (:text text)
      (on-textinput text))
     (:textediting (:text text)
@@ -732,7 +766,7 @@
                                                       (lambda ())
                                                       ;; finalize
                                                       (lambda (report)
-                                                        (log:info "~A" report)
+                                                        (do-log report)
                                                         (sdl2:push-quit-event)))))
                                        (declare (ignore editor-thread))
                                        nil)))))))
@@ -883,16 +917,6 @@
 (defmethod lem-if:scroll ((implementation sdl2) view n)
   (with-debug ("lem-if:scroll" view n)
     ))
-
-(defmethod lem-if:clipboard-paste ((implementation sdl2))
-  (with-debug ("clipboard-paste")
-    (with-renderer ()
-      (sdl2-ffi.functions:sdl-get-clipboard-text))))
-
-(defmethod lem-if:clipboard-copy ((implementation sdl2) text)
-  (with-debug ("clipboard-copy")
-    (with-renderer ()
-      (sdl2-ffi.functions:sdl-set-clipboard-text text))))
 
 (defmethod lem-if:increase-font-size ((implementation sdl2))
   (with-debug ("increase-font-size")
@@ -1119,4 +1143,31 @@
         (buffer (lem:make-buffer (file-namestring pathname))))
     (draw-image buffer image :x 0 :y 0)
     (setf (lem:buffer-read-only-p buffer) t)
-    (lem:switch-to-buffer buffer)))
+    buffer))
+
+;;;
+(setq lem::*enable-clipboard-p* t)
+
+#-windows
+(defmethod lem-if:clipboard-paste ((implementation sdl2))
+  (with-debug ("clipboard-paste")
+    (with-renderer ()
+      (sdl2-ffi.functions:sdl-get-clipboard-text))))
+
+
+#+windows
+(defmethod lem-if:clipboard-paste ((implementation sdl2))
+  (with-debug ("clipboard-paste")
+    (with-renderer ()
+      (with-output-to-string (out)
+        (let ((text (sdl2-ffi.functions:sdl-get-clipboard-text)))
+          (loop :for string :in (split-sequence:split-sequence #\newline text)
+                :do (if (and (< 0 (length string))
+                             (char= #\return (char string (1- (length string)))))
+                        (write-line (subseq string 0 (1- (length string))) out)
+                        (write-string string out))))))))
+
+(defmethod lem-if:clipboard-copy ((implementation sdl2) text)
+  (with-debug ("clipboard-copy")
+    (with-renderer ()
+      (sdl2-ffi.functions:sdl-set-clipboard-text text))))

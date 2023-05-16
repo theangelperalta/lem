@@ -21,7 +21,8 @@
 
 (define-major-mode directory-mode ()
     (:name "Directory"
-     :keymap *directory-mode-keymap*))
+     :keymap *directory-mode-keymap*)
+  (setf (variable-value 'highlight-line :buffer (current-buffer)) nil))
 
 (define-key *directory-mode-keymap* "q" 'quit-active-window)
 (define-key *directory-mode-keymap* "g" 'directory-mode-update-buffer)
@@ -244,7 +245,9 @@
 
 (defun delete-file* (file)
   #+windows
-  (uiop:delete-directory-tree file)
+  (if (uiop:directory-pathname-p file)
+      (sb-ext:delete-directory file :recursive t)
+      (delete-file file))
   #-windows
   (run-command `("rm" "-fr" ,file)))
 
@@ -337,8 +340,11 @@
 
 (define-command directory-mode-find-file-other-window () ()
   (process-current-line-pathname (lambda (pathname)
-                                   (setf (current-window)
-                                         (pop-to-buffer (find-file-buffer pathname))))))
+                                   (let ((buffer (execute-find-file lem::*find-file-executor*
+                                                                    (lem::get-file-mode pathname)
+                                                                    pathname)))
+                                     (setf (current-window)
+                                           (pop-to-buffer buffer))))))
 
 (define-command directory-mode-next-line (p) ("p")
   (line-offset (current-point) p))
@@ -388,10 +394,11 @@
   (query-replace-marked-files 'lem/isearch:query-replace-symbol))
 
 (define-command directory-mode-delete-files () ()
-  (when (prompt-for-y-or-n-p "Really delete files")
-    (dolist (file (selected-files (current-point)))
-      (delete-file* file))
-    (update-all)))
+  (let ((files (selected-files (current-point))))
+    (when (prompt-for-y-or-n-p (format nil "Really delete files~%~{- ~A~%~}" files))
+      (dolist (file files)
+        (delete-file* file))
+      (update-all))))
 
 (defun get-dest-directory ()
   (dolist (window (window-list) (buffer-directory))

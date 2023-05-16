@@ -118,8 +118,9 @@
   (and (characterp char)
        (or (alphanumericp char)
            (char= char #\_)
+           (char= char #\_)
            ;; TODO: Add mechanism to modify
-           ;; these based on isKeyword
+           ;; these based on isKeyword from lisp.vim https://github.com/vim/vim/blob/master/runtime/syntax/lisp.vim#L74C1-L387
            ;; which is modified based on file extension.
            (char= char #\*)
            (char= char #\/)
@@ -217,7 +218,7 @@
     (line-offset (current-point) 1)
     (line-start (current-point)))
   (%vi-forward-word-begin n)
-  (unless *vi-change-recursive* 
+  (unless *vi-change-recursive*
     (if (or *vi-delete-recursive*
             *vi-yank-recursive*)
         (skip-chars-forward (current-point) '(#\Space #\Tab))

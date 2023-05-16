@@ -56,6 +56,7 @@
 (define-key *listener-mode-keymap* "Return" 'listener-return)
 (define-key *listener-mode-keymap* "M-p" 'listener-previous-input)
 (define-key *listener-mode-keymap* "M-n" 'listener-next-input)
+(define-key *listener-mode-keymap* "C-r" 'listener-isearch-history)
 (define-key *listener-mode-keymap* "M-r" 'listener-isearch-history)
 (define-key *listener-mode-keymap* "C-c M-o" 'listener-clear-buffer)
 (define-key *listener-mode-keymap* "C-c C-u" 'listener-clear-input)
@@ -202,6 +203,9 @@
                          (buffer-end-point (current-buffer))))
 
 ;;;
+(define-attribute unmatch-isearch-attribute
+  (t :reverse t))
+
 (defvar *history-isearch-keymap* (make-keymap))
 (define-key *history-isearch-keymap* "M-r" 'listener-isearch-history-previous)
 (define-key *history-isearch-keymap* "C-r" 'listener-isearch-history-previous)
@@ -209,7 +213,8 @@
 (define-key *history-isearch-keymap* "C-s" 'listener-isearch-history-next)
 
 (defvar *listener-buffer*)
-(defvar *history-popup-window*)
+(defvar *listener-window*)
+(defvar *history-window* nil)
 (defvar *history-matched-index*)
 (defvar *history-matched-string*)
 
@@ -227,17 +232,27 @@
                 (character-offset end 1)
                 (put-text-property start end :attribute attribute)))
     (buffer-start point)
-    (insert-string point ": ")
-    (buffer-start point)
     buffer))
 
 (defun redisplay-popup (buffer)
-  (when *history-popup-window*
-    (delete-popup-message *history-popup-window*))
-  (setf *history-popup-window*
-        (display-popup-message buffer
-                               :timeout nil
-                               :style '(:use-border nil :offset-x 1 :offset-y 0))))
+  (when *history-window*
+    (delete-window *history-window*))
+  (let* ((x (window-x *listener-window*))
+         (y (+ (window-y *listener-window*)
+               (window-cursor-y *listener-window*)
+               1))
+         (w (window-width *listener-window*))
+         (h (alexandria:clamp (buffer-nlines buffer)
+                              1
+                              (max 1 (- (window-height *listener-window*)
+                                        (window-cursor-y *listener-window*)
+                                        2)))))
+    (setf *history-window*
+          (make-floating-window :buffer buffer
+                                :x x
+                                :y y
+                                :width w
+                                :height h))))
 
 (defun isearch-continue (next-or-previous-matching)
   (let ((buffer *listener-buffer*))
@@ -245,11 +260,10 @@
         (funcall next-or-previous-matching
                  (listener-history buffer))
       (cond ((null matched-string)
-             (when *history-popup-window*
-               (redisplay-popup (window-buffer *history-popup-window*))
-               (show-message "Failed"
-                             :timeout 1
-                             :style '(:offset-x -5 :offset-y 1 :use-border nil))))
+             (when *history-window*
+               (let ((buffer (make-buffer nil :temporary t)))
+                 (insert-string (buffer-point buffer) "Failed" :attribute 'unmatch-isearch-attribute)
+                 (redisplay-popup buffer))))
             (t
              (redisplay-popup (make-highlight-matches-buffer matched-string matches))
              (setf *history-matched-index* matched-index)
@@ -282,8 +296,9 @@
     (buffer-end (buffer-point buffer))
     (let ((*listener-buffer* buffer)
           (*history-matched-index* nil)
-          (*history-popup-window* nil)
-          (*history-matched-string* nil))
+          (*history-window* nil)
+          (*history-matched-string* nil)
+          (*listener-window* (current-window)))
       (unwind-protect
            (progn
              (prompt-for-string
@@ -297,5 +312,5 @@
               :use-border nil)
              (when *history-matched-string*
                (replace-textarea buffer *history-matched-string*)))
-        (when *history-popup-window*
-          (delete-popup-message *history-popup-window*))))))
+        (when *history-window*
+          (delete-window *history-window*))))))

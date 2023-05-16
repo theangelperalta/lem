@@ -59,7 +59,9 @@
    :color-red
    :color-green
    :color-blue
-   :parse-color)
+   :parse-color
+   :rgb-to-hsv
+   :hsv-to-rgb)
   ;; attribute.lisp
   (:export
    :make-attribute
@@ -498,6 +500,9 @@
    :mark-sexp
    :kill-sexp
    :transpose-sexps)
+  ;; display.lisp
+  (:export
+   :highlight-line)
   ;; interface.lisp
   (:export
    :with-implementation

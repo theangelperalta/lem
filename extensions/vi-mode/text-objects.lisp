@@ -26,7 +26,8 @@
            :broad-word-object
            :paren-object
            :paragraph-object
-           :double-quoted-object
+           :double-quote-object
+           :single-quote-object
            :vi-operator-surrounding-blanks))
 (in-package :lem-vi-mode/text-objects)
 
@@ -275,9 +276,9 @@
     (with-point ((bol point))
       (line-start bol)
       (or (= (mod (%count-quote-between bol point
-                                     :quote-char quote-char
-                                     :escape-char escape-char)
-               2) 1)
+                                        :quote-char quote-char
+                                        :escape-char escape-char)
+                  2) 1)
           (and (char= (character-at point) quote-char)
                (or (null escape-char)
                    (char= (character-at point -1) escape-char)))))))
@@ -388,9 +389,16 @@
    :open-char #\())
 
 ;;
-;; double-quoted-object
+;; single-quote-object
 
-(defclass double-quoted-object (quoted-text-object) ()
+(defclass single-quote-object (quoted-text-object) ()
+  (:default-initargs
+   :quote-char #\'))
+
+;;
+;; double-quote-object
+
+(defclass double-quote-object (quoted-text-object) ()
   (:default-initargs
    :quote-char #\"))
 

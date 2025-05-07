@@ -134,6 +134,8 @@
            :vi-inner-broad-word
            :vi-a-double-quote
            :vi-inner-double-quote
+           :vi-a-single-quote
+           :vi-inner-single-quote
            :vi-a-paren
            :vi-inner-paren
            :vi-a-paragraph
@@ -417,10 +419,10 @@ Move the cursor to the first non-blank character of the line."
                          (max 0
                               (min (1- (length (line-string (current-point)))) pos))))
         (:block
-         (move-to-line (current-point) (min (line-number-at-point start)
-                                            (line-number-at-point end)))
-         (move-to-column (current-point) (min column-start
-                                              column-end))))
+            (move-to-line (current-point) (min (line-number-at-point start)
+                                               (line-number-at-point end)))
+          (move-to-column (current-point) (min column-start
+                                               column-end))))
       ;; After 'dw' or 'dW', move to the first non-blank char
       (when (and (this-motion-command)
                  (member (command-name (this-motion-command))
@@ -521,10 +523,10 @@ Move the cursor to the first non-blank character of the line."
   (yank-region start end :type type)
   (case type
     (:block
-     (move-to-line (current-point) (min (line-number-at-point start)
-                                        (line-number-at-point end)))
-     (move-to-column (current-point) (min (point-column start)
-                                          (point-column end))))
+        (move-to-line (current-point) (min (line-number-at-point start)
+                                           (line-number-at-point end)))
+      (move-to-column (current-point) (min (point-column start)
+                                           (point-column end))))
     (:line
      (move-to-column start (point-charpos (current-point)))
      (move-point (current-point) start))
@@ -546,7 +548,7 @@ Move the cursor to the first non-blank character of the line."
         (and (enable-clipboard-p) (values (get-clipboard-data) :block)))))
 
 (define-command vi-paste-after (&optional (n 1)) (:universal)
-  (dotimes (i n) 
+  (dotimes (i n)
     (multiple-value-bind (string type)
         (vi-yank-from-clipboard-or-killring)
       (cond
@@ -571,7 +573,7 @@ Move the cursor to the first non-blank character of the line."
       (paste-yank string type :after))))
 
 (define-command vi-paste-before (&optional (n 1)) (:universal)
-  (dotimes (i n) 
+  (dotimes (i n)
     (multiple-value-bind (string type)
         (vi-yank-from-clipboard-or-killring)
       (cond
@@ -941,7 +943,7 @@ on the same line or at eol if there are none."
                                         (string c)
                                         limit)
                   unless result
-                    do (return nil)
+                  do (return nil)
                   finally (return t))
         (character-offset p offset)
         (move-point (current-point) p)))))
@@ -1086,6 +1088,14 @@ on the same line or at eol if there are none."
 (define-text-object-command vi-inner-broad-word (count) ("p")
     (:expand-selection t)
   (inner-range-of 'broad-word-object (current-state) count))
+
+(define-text-object-command vi-a-single-quote () ()
+    ()
+  (a-range-of 'single-quote-object (current-state) 1))
+
+(define-text-object-command vi-inner-single-quote () ()
+    ()
+  (inner-range-of 'single-quote-object (current-state) 1))
 
 (define-text-object-command vi-a-double-quote () ()
     ()

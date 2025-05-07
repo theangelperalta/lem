@@ -26,7 +26,29 @@
       (ok (buf= #?"abc <def.ghi[ ]>\n"))
       )))
 
-(deftest double-quoted
+(deftest single-quote
+  (with-fake-interface ()
+    (with-vi-buffer ("[ ]\'foo\' \'bar\'")
+      (cmd "va\'")
+      (ok (buf= " <\'foo\'[ ]>\'bar\'")))
+    (with-vi-buffer (" [\']foo\' \'bar\'")
+      (cmd "va\'")
+      (ok (buf= " <\'foo\'[ ]>\'bar\'")))
+    (with-vi-buffer (" \'f[o]o\' \'bar\'")
+      (cmd "va\'")
+      (ok (buf= " <\'foo\'[ ]>\'bar\'")))
+    (with-vi-buffer (" \'foo[\'] \'bar\'")
+      (cmd "va\'")
+      (ok (buf= " <\'foo\'[ ]>\'bar\'")))
+    (with-vi-buffer (" \'foo\'[ ]\'bar\'")
+      (cmd "va\'")
+      ;; NOTE: This behavior is not same as Vim
+      (ok (buf= " \'foo\'< \'bar[\']>")))
+    (with-vi-buffer (" \'foo\' \'bar[\']")
+      (cmd "va\'")
+      (ok (buf= " \'foo\'< \'bar[\']>")))))
+
+(deftest double-quote
   (with-global-variable-value (lem-vi-mode/text-objects:vi-operator-surrounding-blanks t)
     (with-fake-interface ()
       (with-vi-buffer ("[ ]\"foo\" \"bar\"")
@@ -84,4 +106,3 @@
     (with-vi-buffer (#?" \n \n f[o]o \n bar \n \n \n")
       (cmd "vap")
       (ok (buf= #?" \n \n< foo \n bar \n \n [\n]>")))))
-

@@ -202,30 +202,38 @@ Avoids an O(rows) scan in the hot update loop.")
     ;; if one isn't already pending.  select() returns immediately while
     ;; the PTY buffer holds unread data (it isn't drained until the editor
     ;; thread runs process-input), so without gating the thread would
-    ;; hot-spin.  When an event is already pending we block on a condition
-    ;; variable until the editor thread consumes it and signals us — this
-    ;; avoids both the spin and holding the lock across a sleep, which used
-    ;; to serialize the I/O and editor threads on the lock.
+    ;; hot-spin.  When an event is already pending we sleep briefly before
+    ;; re-checking; this 1ms cadence also throttles the event rate so the
+    ;; editor thread isn't flooded with back-to-back terminal updates and
+    ;; can still service key input and other buffers under heavy output.
+    ;;
+    ;; The lock guards ONLY the event-pending flag.  Both the sleep and
+    ;; send-event run outside it — holding the lock across the sleep used
+    ;; to serialize the I/O and editor threads (the editor blocked behind
+    ;; this thread's nap to clear the flag).
     (let ((event-pending nil)
-          (lock (bt2:make-lock :name "terminal-wakeup"))
-          (cv (bt2:make-condition-variable :name "terminal-wakeup")))
+          (lock (bt2:make-lock :name "terminal-wakeup")))
       (setf (terminal-thread terminal)
             (bt2:make-thread
              (lambda ()
                (loop
                  (ffi::terminal-process-input-wait (terminal-viscus terminal))
-                 ;; Only the event-pending flag is guarded by the lock.  The
-                 ;; sleep is gone; send-event runs outside the lock.
-                 (bt2:with-lock-held (lock)
-                   (loop :while event-pending
-                         :do (bt2:condition-wait cv lock))
-                   (setf event-pending t))
-                 (send-event
-                  (lambda ()
-                    (ignore-errors (update terminal))
-                    (bt2:with-lock-held (lock)
-                      (setf event-pending nil)
-                      (bt2:condition-notify cv))))))
+                 (let ((post nil))
+                   (bt2:with-lock-held (lock)
+                     (unless event-pending
+                       (setf event-pending t
+                             post t)))
+                   (cond
+                     (post
+                      (send-event
+                       (lambda ()
+                         (ignore-errors (update terminal))
+                         (bt2:with-lock-held (lock)
+                           (setf event-pending nil)))))
+                     (t
+                      ;; Previous event not yet consumed — sleep (outside the
+                      ;; lock) to avoid hot-spinning and to throttle the rate.
+                      (sleep 0.001))))))
              :name (format nil "Terminal ~D" id))))
     (add-terminal terminal)
     terminal))

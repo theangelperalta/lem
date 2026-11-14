@@ -2,8 +2,7 @@
   :depends-on ("webview"
                "float-features"
                "lem-server"
-               (:feature (:and :darwin :arm64) "cl-objc"))
+               "lem-cocoa")
   :serial t
-  :components ((:file "darwin")
-               (:file "main")
+  :components ((:file "main")
                (:file "browser")))

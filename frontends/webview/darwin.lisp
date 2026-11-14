@@ -1,50 +1,28 @@
 (defpackage :lem-webview/darwin
   (:use :cl)
+  #+(and darwin arm64)
+  (:import-from :cl-objc
+                :invoke)
   (:export :set-window-appearance
            :dispatch-set-window-appearance))
 (in-package :lem-webview/darwin)
 
-;;; macOS window appearance via Objective-C runtime
+;;; macOS window appearance via cl-objc
 ;;;
-;;; Uses objc_msgSend to set NSAppearance on the key window.
+;;; Sets NSAppearance on the webview's NSWindow with cl-objc's INVOKE,
+;;; which looks up each method's signature in the Objective-C runtime.
 ;;; set-window-appearance takes a webview handle (for pre-event-loop use).
 ;;; dispatch-set-window-appearance uses GCD + [NSApp keyWindow] so the
 ;;; editor thread can change appearance without holding a native handle.
+;;;
+;;; cl-objc supports macOS on arm64 only; elsewhere these are no-ops.
 
-#+darwin
+#+(and darwin arm64)
 (progn
 
-(cffi:define-foreign-library libobjc
-  (:os-macosx "libobjc.dylib"))
-
-(cffi:use-foreign-library libobjc)
-
-(cffi:defcfun ("objc_getClass" objc-get-class) :pointer
-  (name :string))
-
-(cffi:defcfun ("sel_registerName" sel-register-name) :pointer
-  (name :string))
-
-;; Fixed-arity objc_msgSend wrappers — avoids ARM64 variadic ABI issues.
-;; objc_msgSend is not truly variadic; it uses the callee's ABI, so we
-;; must declare the exact parameter types.
-
-(cffi:defcfun ("objc_msgSend" objc-msg-send/no-arg) :pointer
-  (self :pointer)
-  (sel :pointer))
-
-(cffi:defcfun ("objc_msgSend" objc-msg-send/ptr) :pointer
-  (self :pointer)
-  (sel :pointer)
-  (arg :pointer))
-
-(cffi:defcfun ("objc_msgSend" objc-msg-send/str) :pointer
-  (self :pointer)
-  (sel :pointer)
-  (arg :string))
-
 ;; Grand Central Dispatch — dispatch work to the main thread without
-;; needing a webview handle.
+;; needing a webview handle. libdispatch is plain C, not Objective-C,
+;; so it is called through CFFI directly.
 (cffi:defcfun ("dispatch_async_f" dispatch-async-f) :void
   (queue :pointer)
   (context :pointer)
@@ -54,37 +32,40 @@
   "Return the main dispatch queue (dispatch_get_main_queue)."
   (cffi:foreign-symbol-pointer "_dispatch_main_q"))
 
+(defun %appearance-name (mode)
+  "Return the NSAppearance name for MODE (:dark or :light)."
+  (ecase mode
+    (:dark "NSAppearanceNameDarkAqua")
+    (:light "NSAppearanceNameAqua")))
+
 (defun %get-key-window ()
-  "Return the NSWindow that is the current key window, or a null pointer."
-  (let* ((nsapp (objc-msg-send/no-arg
-                 (objc-get-class "NSApplication")
-                 (sel-register-name "sharedApplication")))
-         (window (objc-msg-send/no-arg nsapp (sel-register-name "keyWindow"))))
-    window))
+  "Return the NSWindow that is the current key window, or the nil object."
+  (invoke (invoke 'ns-application shared-application) key-window))
 
 (defun %set-nswindow-appearance (nswindow mode)
   "Set NSAppearance on NSWINDOW to MODE (:dark or :light).
-Must be called on the main thread."
-  (when (or (null nswindow) (cffi:null-pointer-p nswindow))
-    (return-from %set-nswindow-appearance nil))
-  (let* ((appearance-name (ecase mode
-                            (:dark "NSAppearanceNameDarkAqua")
-                            (:light "NSAppearanceNameAqua")))
-         (ns-appearance-class (objc-get-class "NSAppearance"))
-         (ns-name (objc-msg-send/str
-                   (objc-get-class "NSString")
-                   (sel-register-name "stringWithUTF8String:")
-                   appearance-name))
-         (appearance (objc-msg-send/ptr
-                      ns-appearance-class
-                      (sel-register-name "appearanceNamed:")
-                      ns-name)))
-    (when (cffi:null-pointer-p appearance)
+NSWINDOW is a cl-objc object or a raw foreign pointer.
+Must be called on the main thread. Returns MODE, or NIL when there is
+no window or the Objective-C call fails."
+  (let ((window (if (cffi:pointerp nswindow)
+                    (cffi:convert-from-foreign nswindow 'objc-cffi:objc-id)
+                    nswindow)))
+    (when (or (null window) (objc-cffi:objc-nil-object-p window))
       (return-from %set-nswindow-appearance nil))
-    (objc-msg-send/ptr nswindow
-                       (sel-register-name "setAppearance:")
-                       appearance)
-    mode))
+    ;; This runs inside a GCD callback on the main thread, where an
+    ;; unhandled Lisp error would stop the native event loop.
+    (handler-case
+        (let ((appearance (invoke 'ns-appearance
+                                  :appearance-named
+                                  (invoke 'ns-string
+                                          :string-with-utf8-string
+                                          (%appearance-name mode)))))
+          (unless (objc-cffi:objc-nil-object-p appearance)
+            (invoke window :set-appearance appearance)
+            mode))
+      (error (e)
+        (log:error "Failed to set window appearance to ~S: ~A" mode e)
+        nil))))
 
 ;; GCD callbacks — dispatch_async_f signature: void (*)(void *)
 (cffi:defcallback gcd-set-dark-appearance :void ((context :pointer))
@@ -112,16 +93,16 @@ Safe to call from any thread."
                       (:light (cffi:callback gcd-set-light-appearance))))
   mode)
 
-) ; end #+darwin progn
+) ; end #+(and darwin arm64) progn
 
-#-darwin
+#-(and darwin arm64)
 (progn
 (defun set-window-appearance (webview-handle mode)
-  "No-op: window appearance is only supported on macOS."
+  "No-op: window appearance is only supported on macOS (arm64)."
   (declare (ignore webview-handle mode))
   nil)
 (defun dispatch-set-window-appearance (mode)
-  "No-op: window appearance is only supported on macOS."
+  "No-op: window appearance is only supported on macOS (arm64)."
   (declare (ignore mode))
   nil)
 )

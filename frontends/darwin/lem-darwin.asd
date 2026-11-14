@@ -1,4 +1,4 @@
-(defsystem "lem-cocoa"
+(defsystem "lem-darwin"
   :description "macOS (Cocoa) window integration shared by Lem's GUI frontends."
   :depends-on ("cffi"
                "log4cl"

@@ -2,7 +2,7 @@
   :depends-on ("webview"
                "float-features"
                "lem-server"
-               "lem-cocoa")
+               "lem-darwin")
   :serial t
   :components ((:file "main")
                (:file "browser")))

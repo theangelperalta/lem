@@ -1,11 +1,11 @@
-(defpackage :lem-cocoa/appearance
+(defpackage :lem-darwin/appearance
   (:use :cl)
   #+(and darwin arm64)
   (:import-from :cl-objc
                 :invoke)
   (:export :set-window-appearance
            :dispatch-set-window-appearance))
-(in-package :lem-cocoa/appearance)
+(in-package :lem-darwin/appearance)
 
 ;;; The appearance (dark or light title bar and frame) of a Cocoa window.
 ;;;

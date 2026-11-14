@@ -1,6 +1,6 @@
 (uiop:define-package :lem-webview
   (:use :cl)
-  (:import-from :lem-cocoa/appearance
+  (:import-from :lem-darwin/appearance
    :set-window-appearance
    :dispatch-set-window-appearance)
   (:export :*webview-handle*

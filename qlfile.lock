@@ -69,4 +69,4 @@
 ("cl-objc" .
  (:class qlot/source/git:source-git
   :initargs (:remote-url "https://github.com/theangelperalta/cl-objc.git")
-  :version "git-7798434a77deb3610341efe68ae46efb0ff4ae4f"))
+  :version "git-a4a1c7f540cf43186fd158613f6f6c9002445563"))

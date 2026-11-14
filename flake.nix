@@ -259,6 +259,27 @@
           '';
         };
 
+        # Objective-C bridge used by lem-darwin, which loads it only on
+        # Apple Silicon Macs.
+        cl-objc = lisp.buildASDFSystem {
+          inherit (sources.cl-objc) pname src version;
+          systems = ["cl-objc"];
+          lispLibs = with lisp.pkgs; [
+            cffi
+            cffi-grovel
+            cffi-libffi
+            yacc
+            closer-mop
+            org_dot_tfeb_dot_hax
+            trivial-main-thread
+          ];
+        };
+
+        # lem-darwin depends on cl-objc only on Apple Silicon Macs.
+        darwinLispLibs = pkgs.lib.optionals (
+          pkgs.stdenv.hostPlatform.isDarwin && pkgs.stdenv.hostPlatform.isAarch64
+        ) [cl-objc];
+
         cl-webview = lisp.buildASDFSystem {
           inherit (sources.webview) pname src version;
           systems = ["webview"];
@@ -421,6 +442,7 @@
           ];
           lispLibs =
             o.lispLibs
+            ++ darwinLispLibs
             ++ (with lisp.pkgs; [
               sdl2
               sdl2-ttf
@@ -471,6 +493,7 @@
           lispLibs =
             o.lispLibs
             ++ [cl-webview]
+            ++ darwinLispLibs
             ++ (with lisp.pkgs; [
               float-features
               command-line-arguments

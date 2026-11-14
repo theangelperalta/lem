@@ -17,15 +17,15 @@
   };
   cl-objc = {
     pname = "cl-objc";
-    version = "3ff11524110ac71203ba18e1c8bde0716c449acb";
+    version = "5b59c1643c66700e007637c658cc966b59551839";
     src = fetchgit {
       url = "https://github.com/theangelperalta/cl-objc";
-      rev = "3ff11524110ac71203ba18e1c8bde0716c449acb";
+      rev = "5b59c1643c66700e007637c658cc966b59551839";
       fetchSubmodules = false;
       deepClone = false;
       leaveDotGit = false;
       sparseCheckout = [ ];
-      sha256 = "sha256-VLUEujzAyDnyPtINizKWOLYqOcTVEOtWelcS60r+9pY=";
+      sha256 = "sha256-LmuihtR/g+DpkcV/YPrzNEcZenGheOxELSEP2UzhquA=";
     };
     date = "2026-11-14";
   };

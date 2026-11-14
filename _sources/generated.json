@@ -31,13 +31,13 @@
             "fetchSubmodules": false,
             "leaveDotGit": false,
             "name": null,
-            "rev": "3ff11524110ac71203ba18e1c8bde0716c449acb",
-            "sha256": "sha256-VLUEujzAyDnyPtINizKWOLYqOcTVEOtWelcS60r+9pY=",
+            "rev": "5b59c1643c66700e007637c658cc966b59551839",
+            "sha256": "sha256-LmuihtR/g+DpkcV/YPrzNEcZenGheOxELSEP2UzhquA=",
             "sparseCheckout": [],
             "type": "git",
             "url": "https://github.com/theangelperalta/cl-objc"
         },
-        "version": "3ff11524110ac71203ba18e1c8bde0716c449acb"
+        "version": "5b59c1643c66700e007637c658cc966b59551839"
     },
     "jsonrpc": {
         "cargoLocks": null,
